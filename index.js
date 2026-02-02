@@ -1,60 +1,66 @@
+// index.js
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const { Pool } = require('pg');
+const { initDatabase } = require('./database');
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 3000;
 
 // Middleware
 app.use(cors({
-    origin: ['https://ciber7erroristaschk.com', 'http://localhost:5500'],
+    origin: process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : [
+        'https://ciber7erroristaschk.com',
+        'http://localhost:5500',
+        'http://localhost:3000'
+    ],
     credentials: true
 }));
+
 app.use(express.json());
 
-// Conexión a Neon PostgreSQL
-const pool = new Pool({
-    host: process.env.DB_HOST,
-    database: process.env.DB_NAME,
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
-    port: process.env.DB_PORT || 5432,
-    ssl: { rejectUnauthorized: false }
-});
+// Importar rutas
+const authRoutes = require('./routes/auth');
+const adminRoutes = require('./routes/admin');
+const sellerRoutes = require('./routes/seller');
+const livesRoutes = require('./routes/lives');
+const accountsRoutes = require('./routes/accounts');
 
-// Verificar conexión
-pool.connect((err, client, release) => {
-    if (err) {
-        console.error('❌ Error conectando a PostgreSQL:', err);
-    } else {
-        console.log('✅ Conectado a PostgreSQL Neon');
-        release();
-    }
-});
+// Usar rutas
+app.use('/api/auth', authRoutes);
+app.use('/api/admin', adminRoutes);
+app.use('/api/seller', sellerRoutes);
+app.use('/api/lives', livesRoutes);
+app.use('/api/accounts', accountsRoutes);
 
-// Rutas básicas de prueba
-app.get('/api/health', (req, res) => {
+// Health check
+app.get('/api/health', async (req, res) => {
     res.json({ 
-        status: 'OK', 
+        status: 'healthy',
+        service: 'checkerct-api',
         timestamp: new Date().toISOString(),
-        service: 'checkerct-api'
+        version: '1.0.0'
     });
 });
 
-app.get('/api/test-db', async (req, res) => {
+// Inicializar servidor
+const startServer = async () => {
     try {
-        const result = await pool.query('SELECT NOW() as time');
-        res.json({ success: true, time: result.rows[0].time });
+        await initDatabase();
+        
+        app.listen(PORT, '0.0.0.0', () => {
+            console.log(`🚀 API CheckerCT ejecutándose en puerto ${PORT}`);
+            console.log(`✅ Health check: http://localhost:${PORT}/api/health`);
+            console.log(`🔐 Registro: POST http://localhost:${PORT}/api/auth/register`);
+            console.log(`🔑 Login: POST http://localhost:${PORT}/api/auth/login`);
+            console.log(`💳 Lives: GET http://localhost:${PORT}/api/lives`);
+            console.log(`👤 Cuentas: GET http://localhost:${PORT}/api/accounts`);
+            console.log(`👑 Admin: username: admin, password: ${process.env.ADMIN_PASSWORD || 'admin123'}`);
+        });
     } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
+        console.error('❌ Error al iniciar servidor:', error);
+        process.exit(1);
     }
-});
+};
 
-// Aquí importarás las rutas reales después
-// app.use('/api/auth', require('./routes/auth'));
-// app.use('/api/lives', require('./routes/lives'));
-
-app.listen(PORT, () => {
-    console.log(`🚀 Servidor API en puerto ${PORT}`);
-});
+startServer();
