@@ -1,4 +1,4 @@
-// routes/auth.js
+// routes/auth.js - VERSIÓN CORREGIDA
 const express = require('express');
 const router = express.Router();
 const jwt = require('jsonwebtoken');
@@ -6,23 +6,10 @@ const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const { pool } = require('../database');
 const { trackActivity } = require('../middleware/auth');
-const TelegramBot = require('node-telegram-bot-api');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'checkerct-secret-key';
 
-// Inicializar bot de Telegram
-let bot;
-if (process.env.TELEGRAM_BOT_TOKEN) {
-    bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { 
-        polling: false,
-        onlyFirstMatch: true
-    });
-    console.log('✅ Bot de Telegram inicializado');
-} else {
-    console.warn('⚠️  TELEGRAM_BOT_TOKEN no configurado. Verificación por Telegram desactivada.');
-}
-
-// ========== REGISTRO ==========
+// ========== REGISTRO (CORREGIDO) ==========
 router.post('/register', trackActivity, async (req, res) => {
     const client = await pool.connect();
     
@@ -55,39 +42,59 @@ router.post('/register', trackActivity, async (req, res) => {
             });
         }
         
-        // Verificar si usuario existe
+        // Verificar si usuario ya dio /start (tiene telegram_chat_id)
         const existingUser = await client.query(
-            'SELECT id FROM users WHERE username = $1',
+            'SELECT id, telegram_chat_id FROM users WHERE username = $1',
             [username]
         );
         
+        let telegramChatId = null;
+        let userId;
+        
         if (existingUser.rows.length > 0) {
-            return res.status(400).json({ 
-                success: false, 
-                error: 'Nombre de usuario ya está en uso' 
+            // Usuario ya existe (dio /start al bot)
+            const user = existingUser.rows[0];
+            
+            if (!user.telegram_chat_id) {
+                return res.status(400).json({
+                    success: false,
+                    error: `Debes dar /start al bot primero. Busca @C1ber7errorist4sBot en Telegram, escribe /start, y luego regístrate.`
+                });
+            }
+            
+            telegramChatId = user.telegram_chat_id;
+            userId = user.id;
+            
+            // Actualizar con contraseña y datos faltantes
+            const salt = await bcrypt.genSalt(10);
+            const passwordHash = await bcrypt.hash(password, salt);
+            
+            await client.query(
+                `UPDATE users 
+                 SET password_hash = $1, 
+                     display_name = $2,
+                     credits = 20,
+                     days_remaining = 7,
+                     telegram_username = $3,
+                     is_active = FALSE,
+                     updated_at = NOW()
+                 WHERE id = $4
+                 RETURNING id, username, display_name, credits, days_remaining`,
+                [
+                    passwordHash,
+                    display_name || username,
+                    `@${username}`,
+                    user.id
+                ]
+            );
+            
+        } else {
+            // Usuario NO ha dado /start - ERROR
+            return res.status(400).json({
+                success: false,
+                error: `Debes dar /start al bot primero. Busca @C1ber7errorist4sBot en Telegram, escribe /start, y luego regístrate.`
             });
         }
-        
-        // Hash de contraseña
-        const salt = await bcrypt.genSalt(10);
-        const passwordHash = await bcrypt.hash(password, salt);
-        
-        // Crear usuario (NO activado hasta verificación)
-        const userResult = await client.query(
-            `INSERT INTO users 
-             (username, password_hash, display_name, credits, days_remaining, 
-              telegram_username, is_active, created_at)
-             VALUES ($1, $2, $3, 20, 7, $4, FALSE, NOW())
-             RETURNING id, username, display_name, credits, days_remaining`,
-            [
-                username,
-                passwordHash,
-                display_name || username,
-                username // telegram_username
-            ]
-        );
-        
-        const user = userResult.rows[0];
         
         // Generar código de verificación
         const verificationCode = crypto.randomInt(100000, 999999).toString();
@@ -97,38 +104,53 @@ router.post('/register', trackActivity, async (req, res) => {
             `INSERT INTO verification_codes 
              (user_id, code, expires_at, created_at)
              VALUES ($1, $2, $3, NOW())`,
-            [user.id, verificationCode, expiresAt]
+            [userId, verificationCode, expiresAt]
         );
         
-        // Enviar código por Telegram (si el bot está configurado)
-        if (bot && process.env.NODE_ENV === 'production') {
+        // IMPORTANTE: Guardar el bot aquí desde la configuración global
+        const { bot } = require('../telegram-bot');
+        let telegramSent = false;
+        let telegramError = null;
+        
+        // Enviar código por Telegram usando chat_id
+        if (bot && telegramChatId) {
             try {
                 await bot.sendMessage(
-                    username.startsWith('@') ? username.substring(1) : username,
+                    telegramChatId,
                     `🔐 *Código de verificación - CiberTerroristasCHK*\n\n` +
-                    `Tu código es: *${verificationCode}*\n` +
-                    `Válido por 10 minutos.\n\n` +
-                    `⚠️ *No compartas este código con nadie.*\n` +
-                    `Si no solicitaste esto, ignora este mensaje.`,
+                    `Para completar tu registro:\n\n` +
+                    `Código: *${verificationCode}*\n` +
+                    `⏰ Válido por 10 minutos\n\n` +
+                    `Ingresa este código en la página web.\n\n` +
+                    `⚠️ *No compartas este código con nadie.*`,
                     { parse_mode: 'Markdown' }
                 );
                 
-                console.log(`✅ Código enviado a @${username}: ${verificationCode}`);
+                telegramSent = true;
+                console.log(`✅ Código enviado a Chat ID ${telegramChatId}: ${verificationCode}`);
+                
+                // Guardar log exitoso
+                await client.query(
+                    `INSERT INTO verification_logs 
+                     (user_id, code, sent_via, status, created_at)
+                     VALUES ($1, $2, 'telegram', 'sent', NOW())`,
+                    [userId, verificationCode]
+                );
                 
             } catch (telegramError) {
                 console.error('❌ Error enviando código por Telegram:', telegramError);
                 
-                // Si no se puede enviar por Telegram, guardar en logs
+                // Guardar log de error
                 await client.query(
                     `INSERT INTO verification_logs 
                      (user_id, code, sent_via, status, error_message, created_at)
                      VALUES ($1, $2, 'telegram', 'failed', $3, NOW())`,
-                    [user.id, verificationCode, telegramError.message]
+                    [userId, verificationCode, telegramError.message]
                 );
-                
-                // No fallar el registro, pero informar al usuario
-                user.telegram_error = true;
             }
+        } else {
+            telegramError = 'Bot no configurado o sin chat_id';
+            console.error('❌ No se puede enviar código:', telegramError);
         }
         
         // En desarrollo, mostrar código en consola
@@ -141,27 +163,34 @@ router.post('/register', trackActivity, async (req, res) => {
         res.json({ 
             success: true,
             user: {
-                id: user.id,
-                username: user.username,
-                display_name: user.display_name,
-                credits: user.credits,
-                days_remaining: user.days_remaining
+                id: userId,
+                username: username,
+                display_name: display_name || username,
+                credits: 20,
+                days_remaining: 7
             },
             requires_verification: true,
-            telegram_sent: !user.telegram_error,
-            message: 'Registro exitoso. Verifica tu cuenta con el código enviado por Telegram.'
+            telegram_sent: telegramSent,
+            telegram_error: telegramError,
+            message: telegramSent ? 
+                'Registro exitoso. Revisa Telegram para el código.' :
+                'Registro exitoso, pero no se pudo enviar el código por Telegram.'
         });
         
     } catch (error) {
         await client.query('ROLLBACK');
         console.error('Error en registro:', error);
-        res.status(500).json({ success: false, error: 'Error interno del servidor' });
+        res.status(500).json({ 
+            success: false, 
+            error: 'Error interno del servidor',
+            details: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
     } finally {
         client.release();
     }
 });
 
-// ========== SOLICITAR CÓDIGO DE VERIFICACIÓN ==========
+// ========== SOLICITAR CÓDIGO DE VERIFICACIÓN (RE-ENVIAR) ==========
 router.post('/request-verification', trackActivity, async (req, res) => {
     const client = await pool.connect();
     
@@ -176,13 +205,16 @@ router.post('/request-verification', trackActivity, async (req, res) => {
                 error: 'Username es requerido' 
             });
         }
+
+        // Quitar @ si existe para búsqueda
+        const cleanUsername = username.startsWith('@') ? username.slice(1) : username;
         
         // Buscar usuario
         const userResult = await client.query(
-            `SELECT id, username, is_active 
+            `SELECT id, username, is_active, telegram_chat_id 
              FROM users 
-             WHERE username = $1 OR telegram_username = $1`,
-            [username]
+             WHERE username = $1`,
+            [cleanUsername]
         );
         
         if (userResult.rows.length === 0) {
@@ -199,6 +231,14 @@ router.post('/request-verification', trackActivity, async (req, res) => {
             return res.status(400).json({ 
                 success: false, 
                 error: 'La cuenta ya está verificada' 
+            });
+        }
+        
+        // Verificar que tenga chat_id
+        if (!user.telegram_chat_id) {
+            return res.status(400).json({
+                success: false,
+                error: 'No tienes chat_id. Debes dar /start al bot primero.'
             });
         }
         
@@ -219,33 +259,32 @@ router.post('/request-verification', trackActivity, async (req, res) => {
             [user.id, verificationCode, expiresAt]
         );
         
-        // Enviar por Telegram
+        // Importar bot
+        const { bot } = require('../telegram-bot');
         let telegramSent = false;
         let telegramError = null;
         
+        // Enviar por Telegram usando chat_id
         if (bot) {
             try {
-                const telegramUsername = user.telegram_username || user.username;
-                const chatId = telegramUsername.startsWith('@') ? 
-                    telegramUsername.substring(1) : telegramUsername;
-                
                 await bot.sendMessage(
-                    chatId,
-                    `🔐 *Código de verificación - CiberTerroristasCHK*\n\n` +
-                    `Solicitaste un nuevo código.\n` +
-                    `Tu código es: *${verificationCode}*\n` +
-                    `Válido por 10 minutos.\n\n` +
+                    user.telegram_chat_id,
+                    `🔐 *Nuevo código de verificación*\n\n` +
+                    `Solicitaste un nuevo código.\n\n` +
+                    `Código: *${verificationCode}*\n` +
+                    `⏰ Válido por 10 minutos\n\n` +
                     `⚠️ *No compartas este código con nadie.*`,
                     { parse_mode: 'Markdown' }
                 );
                 
                 telegramSent = true;
-                console.log(`✅ Código reenviado a @${chatId}`);
+                console.log(`✅ Código reenviado a Chat ID ${user.telegram_chat_id}`);
                 
+                // Guardar log
                 await client.query(
                     `INSERT INTO verification_logs 
                      (user_id, code, sent_via, status, created_at)
-                     VALUES ($1, $2, 'telegram', 'sent', NOW())`,
+                     VALUES ($1, $2, 'telegram', 'resent', NOW())`,
                     [user.id, verificationCode]
                 );
                 
@@ -269,14 +308,17 @@ router.post('/request-verification', trackActivity, async (req, res) => {
             telegram_sent: telegramSent,
             telegram_error: telegramError,
             message: telegramSent ? 
-                'Código enviado por Telegram' : 
+                'Código reenviado por Telegram' : 
                 'Error enviando código por Telegram'
         });
         
     } catch (error) {
         await client.query('ROLLBACK');
         console.error('Error solicitando verificación:', error);
-        res.status(500).json({ success: false, error: 'Error interno del servidor' });
+        res.status(500).json({ 
+            success: false, 
+            error: 'Error interno del servidor' 
+        });
     } finally {
         client.release();
     }
@@ -298,16 +340,18 @@ router.post('/verify-code', trackActivity, async (req, res) => {
             });
         }
         
-        // Buscar usuario
+        // Quitar @ si existe
+        const cleanUsername = username.startsWith('@') ? username.slice(1) : username;
+        
+        // Buscar usuario y código
         const userResult = await client.query(
             `SELECT u.id, u.username, u.is_active, vc.code, vc.expires_at
              FROM users u
              LEFT JOIN verification_codes vc ON u.id = vc.user_id
-             WHERE (u.username = $1 OR u.telegram_username = $1) 
-               AND vc.code = $2
+             WHERE u.username = $1 AND vc.code = $2
              ORDER BY vc.created_at DESC
              LIMIT 1`,
-            [username, code]
+            [cleanUsername, code]
         );
         
         if (userResult.rows.length === 0) {
@@ -369,7 +413,10 @@ router.post('/verify-code', trackActivity, async (req, res) => {
     } catch (error) {
         await client.query('ROLLBACK');
         console.error('Error verificando código:', error);
-        res.status(500).json({ success: false, error: 'Error interno del servidor' });
+        res.status(500).json({ 
+            success: false, 
+            error: 'Error interno del servidor' 
+        });
     } finally {
         client.release();
     }
@@ -387,12 +434,15 @@ router.post('/login', trackActivity, async (req, res) => {
             });
         }
         
+        // Quitar @ si existe
+        const cleanUsername = username.startsWith('@') ? username.slice(1) : username;
+        
         // Buscar usuario
         const userResult = await pool.query(
             `SELECT u.* 
              FROM users u
-             WHERE u.username = $1 OR u.telegram_username = $1`,
-            [username]
+             WHERE u.username = $1`,
+            [cleanUsername]
         );
         
         if (userResult.rows.length === 0) {
@@ -452,7 +502,8 @@ router.post('/login', trackActivity, async (req, res) => {
             total_lives: user.total_lives,
             created_at: user.created_at,
             telegram_verified: user.telegram_verified,
-            telegram_username: user.telegram_username
+            telegram_username: user.telegram_username,
+            telegram_chat_id: user.telegram_chat_id ? '***' : null
         };
         
         res.json({ 
@@ -464,7 +515,10 @@ router.post('/login', trackActivity, async (req, res) => {
         
     } catch (error) {
         console.error('Error en login:', error);
-        res.status(500).json({ success: false, error: 'Error interno del servidor' });
+        res.status(500).json({ 
+            success: false, 
+            error: 'Error interno del servidor' 
+        });
     }
 });
 
@@ -538,9 +592,12 @@ router.get('/check-username/:username', async (req, res) => {
     try {
         const { username } = req.params;
         
+        // Quitar @ si existe
+        const cleanUsername = username.startsWith('@') ? username.slice(1) : username;
+        
         const result = await pool.query(
-            'SELECT id FROM users WHERE username = $1 OR telegram_username = $1',
-            [username]
+            'SELECT id FROM users WHERE username = $1',
+            [cleanUsername]
         );
         
         res.json({ 
@@ -553,7 +610,10 @@ router.get('/check-username/:username', async (req, res) => {
         
     } catch (error) {
         console.error('Error verificando usuario:', error);
-        res.status(500).json({ success: false, error: 'Error interno del servidor' });
+        res.status(500).json({ 
+            success: false, 
+            error: 'Error interno del servidor' 
+        });
     }
 });
 
@@ -573,12 +633,15 @@ router.post('/forgot-password', trackActivity, async (req, res) => {
             });
         }
         
+        // Quitar @ si existe
+        const cleanUsername = username.startsWith('@') ? username.slice(1) : username;
+        
         // Buscar usuario
         const userResult = await client.query(
-            `SELECT id, username, telegram_username, is_active
+            `SELECT id, username, telegram_username, is_active, telegram_chat_id
              FROM users 
-             WHERE username = $1 OR telegram_username = $1`,
-            [username]
+             WHERE username = $1`,
+            [cleanUsername]
         );
         
         if (userResult.rows.length === 0) {
@@ -597,6 +660,14 @@ router.post('/forgot-password', trackActivity, async (req, res) => {
             });
         }
         
+        // Verificar que tenga chat_id
+        if (!user.telegram_chat_id) {
+            return res.status(400).json({
+                success: false,
+                error: 'No tienes chat_id. Debes dar /start al bot primero.'
+            });
+        }
+        
         // Generar código de recuperación
         const resetCode = crypto.randomInt(100000, 999999).toString();
         const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutos
@@ -608,21 +679,23 @@ router.post('/forgot-password', trackActivity, async (req, res) => {
             [user.id, resetCode, expiresAt]
         );
         
-        // Enviar por Telegram
-        if (bot && user.telegram_username) {
+        // Importar bot
+        const { bot } = require('../telegram-bot');
+        
+        // Enviar por Telegram usando chat_id
+        if (bot && user.telegram_chat_id) {
             try {
                 await bot.sendMessage(
-                    user.telegram_username.startsWith('@') ? 
-                        user.telegram_username.substring(1) : user.telegram_username,
-                    `🔐 *Recuperación de contraseña - CiberTerroristasCHK*\n\n` +
+                    user.telegram_chat_id,
+                    `🔐 *Recuperación de contraseña*\n\n` +
                     `Tu código de recuperación es: *${resetCode}*\n` +
-                    `Válido por 15 minutos.\n\n` +
+                    `⏰ Válido por 15 minutos\n\n` +
                     `⚠️ *No compartas este código con nadie.*\n` +
                     `Si no solicitaste esto, ignora este mensaje.`,
                     { parse_mode: 'Markdown' }
                 );
                 
-                console.log(`✅ Código de recuperación enviado a @${user.telegram_username}`);
+                console.log(`✅ Código de recuperación enviado a Chat ID ${user.telegram_chat_id}`);
                 
             } catch (error) {
                 console.error('❌ Error enviando código de recuperación:', error);
@@ -634,13 +707,16 @@ router.post('/forgot-password', trackActivity, async (req, res) => {
         res.json({ 
             success: true,
             message: 'Código de recuperación enviado por Telegram',
-            telegram_sent: !!user.telegram_username
+            telegram_sent: !!user.telegram_chat_id
         });
         
     } catch (error) {
         await client.query('ROLLBACK');
         console.error('Error en recuperación:', error);
-        res.status(500).json({ success: false, error: 'Error interno del servidor' });
+        res.status(500).json({ 
+            success: false, 
+            error: 'Error interno del servidor' 
+        });
     } finally {
         client.release();
     }
@@ -670,17 +746,20 @@ router.post('/reset-password', trackActivity, async (req, res) => {
             });
         }
         
+        // Quitar @ si existe
+        const cleanUsername = username.startsWith('@') ? username.slice(1) : username;
+        
         // Verificar código
         const result = await client.query(
             `SELECT u.id, prc.expires_at
              FROM users u
              JOIN password_reset_codes prc ON u.id = prc.user_id
-             WHERE (u.username = $1 OR u.telegram_username = $1) 
+             WHERE u.username = $1
                AND prc.code = $2
                AND prc.used = FALSE
              ORDER BY prc.created_at DESC
              LIMIT 1`,
-            [username, code]
+            [cleanUsername, code]
         );
         
         if (result.rows.length === 0) {
@@ -726,7 +805,10 @@ router.post('/reset-password', trackActivity, async (req, res) => {
     } catch (error) {
         await client.query('ROLLBACK');
         console.error('Error reseteando contraseña:', error);
-        res.status(500).json({ success: false, error: 'Error interno del servidor' });
+        res.status(500).json({ 
+            success: false, 
+            error: 'Error interno del servidor' 
+        });
     } finally {
         client.release();
     }
