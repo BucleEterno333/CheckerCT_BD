@@ -153,6 +153,7 @@ const initDatabase = async () => {
             CREATE TABLE IF NOT EXISTS checkers (
                 id SERIAL PRIMARY KEY,
                 name VARCHAR(100) UNIQUE NOT NULL, -- Shadow, Cronos, Moon
+            )    
         `);
 
         // Tabla de gates
