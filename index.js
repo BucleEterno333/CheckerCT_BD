@@ -54,6 +54,10 @@ const startServer = async () => {
         console.log('🔄 Inicializando base de datos...');
         await initDatabase();
         console.log('✅ Base de datos lista');
+
+        // INICIAR BOT DE TELEGRAM
+        const { bot } = require('./telegram-bot');
+        console.log('🤖 Bot de Telegram listo para recibir /start');
         
         app.listen(PORT, '0.0.0.0', () => {
             console.log(`🚀 API CheckerCT ejecutándose en http://0.0.0.0:${PORT}`);
