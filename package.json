@@ -6,23 +6,17 @@
     "start": "node index.js",
     "dev": "nodemon index.js",
     "docker:build": "docker build -t checkerct-backend .",
-    "docker:run": "docker run -p 3000:3000 --env-file .env checkerct-backend",
-    "docker:compose": "docker-compose up",
-    "docker:compose-build": "docker-compose up --build",
-    "setup-admin": "node -e \"const bcrypt = require('bcryptjs'); console.log(bcrypt.hashSync(process.argv[1], 10));\"",
     "telegram-bot": "node telegram-bot.js"
   },
   "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
     "dotenv": "^16.0.0",
     "express": "^4.18.0",
-    "cors": "^2.8.5",
-    "pg": "^8.11.3",
-    "bcryptjs": "^2.4.3",
+    "express-rate-limit": "^6.0.0",  
     "jsonwebtoken": "^9.0.0",
-    "express-rate-limit": "^7.1.5",
     "node-telegram-bot-api": "^0.66.0",
-    "helmet": "^7.1.0",
-    "compression": "^1.7.4"
+    "pg": "^8.11.3"
   },
   "devDependencies": {
     "nodemon": "^3.0.2"
