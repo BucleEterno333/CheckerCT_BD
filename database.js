@@ -150,7 +150,7 @@ const initDatabase = async () => {
 
         // Tabla de Checkers
         await pool.query(`
-            CREATE TABLE IF NOT EXISTS pages (
+            CREATE TABLE IF NOT EXISTS checkers (
                 id SERIAL PRIMARY KEY,
                 name VARCHAR(100) UNIQUE NOT NULL, -- Shadow, Cronos, Moon
         `);
