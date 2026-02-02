@@ -152,13 +152,12 @@ const initDatabase = async () => {
                 has_mobile_data BOOLEAN DEFAULT TRUE,
                 data_plan_gb INTEGER,
                 status VARCHAR(20) DEFAULT 'available', -- available, in_use, lost, blocked
-                assigned_at TIMESTAMP,
                 notes TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         `);
         
-        // Tabla de DISPOSITIVOS
+        // Tabla de DISPOSITIVOS (CORREGIDO: ON DELETE SET NULL)
         await pool.query(`
             CREATE TABLE IF NOT EXISTS devices (
                 id SERIAL PRIMARY KEY,
@@ -174,15 +173,13 @@ const initDatabase = async () => {
                 os VARCHAR(50),
                 imei VARCHAR(100),
                 serial_number VARCHAR(100),
-                current_number_id INTEGER REFERENCES phone_numbers(id),
+                current_number_id INTEGER REFERENCES phone_numbers(id) ON DELETE SET NULL,
                 status VARCHAR(20) DEFAULT 'active', -- active, broken, formatted, lost
                 notes TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 last_used TIMESTAMP
             )
         `);
-
-
 
         // ============================================
         // 4. TABLAS DE CUENTAS Y LIVES
@@ -203,8 +200,8 @@ const initDatabase = async () => {
                 account_password VARCHAR(500), -- Encriptado
                 
                 -- Datos de dispositivo/número
-                device_id INTEGER REFERENCES devices(id),
-                phone_number_id INTEGER REFERENCES phone_numbers(id),
+                device_id INTEGER REFERENCES devices(id) ON DELETE SET NULL,
+                phone_number_id INTEGER REFERENCES phone_numbers(id) ON DELETE SET NULL,
                 
                 -- Estadísticas
                 total_associated_cards INTEGER DEFAULT 0,
@@ -226,7 +223,7 @@ const initDatabase = async () => {
             )
         `);
 
-        // Tabla de LIVES (tarjetas válidas)
+        // Tabla de LIVES (tarjetas válidas) - CORREGIDO: removed associated_account_id
         await pool.query(`
             CREATE TABLE IF NOT EXISTS user_lives (
                 id SERIAL PRIMARY KEY,
@@ -250,10 +247,6 @@ const initDatabase = async () => {
                 check_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 status VARCHAR(20) DEFAULT 'live', -- live, used, expired, burned
                 phase VARCHAR(20) DEFAULT 'pending', -- pending, testing, ready, used
-                
-                -- Asociación actual
-                associated_account_id INTEGER REFERENCES user_accounts(id),
-                associated_date DATE,
                 
                 -- Seguimiento
                 total_payment_attempts INTEGER DEFAULT 0,
@@ -302,9 +295,7 @@ const initDatabase = async () => {
                 
                 -- Notas
                 notes TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                
-                UNIQUE(account_id, product_id, purchase_date)
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         `);
 
@@ -312,7 +303,7 @@ const initDatabase = async () => {
         // 5. TABLAS DE ACCIONES Y LOGS
         // ============================================
         
-        // Tabla de ACCIONES sobre lives
+        // Tabla de ACCIONES sobre lives (CORREGIDA: removed address field)
         await pool.query(`
             CREATE TABLE IF NOT EXISTS live_actions (
                 id SERIAL PRIMARY KEY,
@@ -351,8 +342,8 @@ const initDatabase = async () => {
                 transferred_to_user_id INTEGER REFERENCES users(id),
                 
                 -- Dispositivo/número usado
-                device_id INTEGER REFERENCES devices(id),
-                phone_number_id INTEGER REFERENCES phone_numbers(id),
+                device_id INTEGER REFERENCES devices(id) ON DELETE SET NULL,
+                phone_number_id INTEGER REFERENCES phone_numbers(id) ON DELETE SET NULL,
                 
                 -- Fechas
                 action_date DATE NOT NULL,
@@ -392,9 +383,7 @@ const initDatabase = async () => {
                 code VARCHAR(6) NOT NULL,
                 expires_at TIMESTAMP NOT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                used BOOLEAN DEFAULT FALSE,
-                
-                UNIQUE(user_id, code)
+                used BOOLEAN DEFAULT FALSE
             )
         `);
 
@@ -423,64 +412,63 @@ const initDatabase = async () => {
             )
         `);
 
-        // Modificar tabla users para agregar campos de Telegram
+        // ============================================
+        // 7. ÍNDICES PARA PERFORMANCE (CORREGIDOS)
+        // ============================================
+        
+        // Índices de usuarios
         await pool.query(`
-            ALTER TABLE users 
-            ADD COLUMN IF NOT EXISTS telegram_username VARCHAR(50),
-            ADD COLUMN IF NOT EXISTS telegram_verified BOOLEAN DEFAULT FALSE,
-            ADD COLUMN IF NOT EXISTS verified_at TIMESTAMP,
-            ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT FALSE
+            CREATE INDEX IF NOT EXISTS idx_users_created_by ON users(created_by);
+            CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
+            CREATE INDEX IF NOT EXISTS idx_users_telegram ON users(telegram_username);
+            CREATE INDEX IF NOT EXISTS idx_users_is_active ON users(is_active);
         `);
 
-        // Índices para mejor performance
+        // Índices de lives
+        await pool.query(`
+            CREATE INDEX IF NOT EXISTS idx_user_lives_user ON user_lives(user_id);
+            CREATE INDEX IF NOT EXISTS idx_user_lives_bin ON user_lives(card_bin);
+            CREATE INDEX IF NOT EXISTS idx_user_lives_status ON user_lives(status);
+            CREATE INDEX IF NOT EXISTS idx_user_lives_checker ON user_lives(checker_id);
+            CREATE INDEX IF NOT EXISTS idx_user_lives_check_date ON user_lives(check_date DESC);
+        `);
+
+        // Índices de cuentas
+        await pool.query(`
+            CREATE INDEX IF NOT EXISTS idx_user_accounts_user ON user_accounts(user_id);
+            CREATE INDEX IF NOT EXISTS idx_user_accounts_page ON user_accounts(page_id);
+            CREATE INDEX IF NOT EXISTS idx_user_accounts_status ON user_accounts(status);
+        `);
+
+        // Índices de dispositivos y números
+        await pool.query(`
+            CREATE INDEX IF NOT EXISTS idx_devices_user ON devices(user_id);
+            CREATE INDEX IF NOT EXISTS idx_devices_number ON devices(current_number_id);
+            CREATE INDEX IF NOT EXISTS idx_phone_numbers_user ON phone_numbers(user_id);
+        `);
+
+        // Índices de acciones
+        await pool.query(`
+            CREATE INDEX IF NOT EXISTS idx_live_actions_live ON live_actions(live_id);
+            CREATE INDEX IF NOT EXISTS idx_live_actions_user ON live_actions(user_id);
+            CREATE INDEX IF NOT EXISTS idx_live_actions_date ON live_actions(action_date DESC);
+            CREATE INDEX IF NOT EXISTS idx_live_actions_type ON live_actions(action_type);
+        `);
+
+        // Índices de compras
+        await pool.query(`
+            CREATE INDEX IF NOT EXISTS idx_purchases_account ON account_purchases(account_id);
+            CREATE INDEX IF NOT EXISTS idx_purchases_live ON account_purchases(live_id);
+            CREATE INDEX IF NOT EXISTS idx_purchases_status ON account_purchases(status);
+            CREATE INDEX IF NOT EXISTS idx_purchases_date ON account_purchases(purchase_date DESC);
+        `);
+
+        // Índices de verificación
         await pool.query(`
             CREATE INDEX IF NOT EXISTS idx_verification_codes_user ON verification_codes(user_id);
             CREATE INDEX IF NOT EXISTS idx_verification_codes_expires ON verification_codes(expires_at);
             CREATE INDEX IF NOT EXISTS idx_verification_logs_user ON verification_logs(user_id);
             CREATE INDEX IF NOT EXISTS idx_password_reset_codes_user ON password_reset_codes(user_id);
-            CREATE INDEX IF NOT EXISTS idx_users_telegram ON users(telegram_username);
-            CREATE INDEX IF NOT EXISTS idx_users_is_active ON users(is_active);
-        `);
-
-
-
-        // ============================================
-        // 7. ÍNDICES PARA PERFORMANCE
-        // ============================================
-        
-        await pool.query(`
-            -- Índices de usuarios
-            CREATE INDEX IF NOT EXISTS idx_users_created_by ON users(created_by);
-            CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
-            CREATE INDEX IF NOT EXISTS idx_users_telegram ON users(telegram_username);
-            
-            -- Índices de lives
-            CREATE INDEX IF NOT EXISTS idx_user_lives_user ON user_lives(user_id);
-            CREATE INDEX IF NOT EXISTS idx_user_lives_bin ON user_lives(card_bin);
-            CREATE INDEX IF NOT EXISTS idx_user_lives_status ON user_lives(status);
-            CREATE INDEX IF NOT EXISTS idx_user_lives_account ON user_lives(associated_account_id);
-            CREATE INDEX IF NOT EXISTS idx_user_lives_checker ON user_lives(checker_id);
-            
-            -- Índices de cuentas
-            CREATE INDEX IF NOT EXISTS idx_user_accounts_user ON user_accounts(user_id);
-            CREATE INDEX IF NOT EXISTS idx_user_accounts_page ON user_accounts(page_id);
-            CREATE INDEX IF NOT EXISTS idx_user_accounts_status ON user_accounts(status);
-            
-            -- Índices de dispositivos y números
-            CREATE INDEX IF NOT EXISTS idx_devices_user ON devices(user_id);
-            CREATE INDEX IF NOT EXISTS idx_devices_number ON devices(current_number_id);
-            CREATE INDEX IF NOT EXISTS idx_phone_numbers_user ON phone_numbers(user_id);
-            CREATE INDEX IF NOT EXISTS idx_phone_numbers_device ON phone_numbers(current_device_id);
-            
-            -- Índices de acciones
-            CREATE INDEX IF NOT EXISTS idx_live_actions_live ON live_actions(live_id);
-            CREATE INDEX IF NOT EXISTS idx_live_actions_user ON live_actions(user_id);
-            CREATE INDEX IF NOT EXISTS idx_live_actions_date ON live_actions(action_date DESC);
-            
-            -- Índices de compras
-            CREATE INDEX IF NOT EXISTS idx_purchases_account ON account_purchases(account_id);
-            CREATE INDEX IF NOT EXISTS idx_purchases_live ON account_purchases(live_id);
-            CREATE INDEX IF NOT EXISTS idx_purchases_status ON account_purchases(status);
         `);
 
         // ============================================
@@ -495,7 +483,6 @@ const initDatabase = async () => {
             {name: 'uber', display_name: 'Uber', allows_associate: false, requires_login_number: true},
             {name: 'shein', display_name: 'Shein', allows_associate: false, requires_login_number: true},
             {name: 'didi', display_name: 'Didi', allows_associate: false, requires_login_number: true}
-
         ];
         
         for (const page of defaultPages) {
@@ -511,7 +498,6 @@ const initDatabase = async () => {
             {name: 'Shadow', type: 'premium'},
             {name: 'Cronos', type: 'premium'},
             {name: 'Moon', type: 'regular'}
-
         ];
         
         for (const checker of defaultCheckers) {
@@ -519,6 +505,30 @@ const initDatabase = async () => {
                 `INSERT INTO checkers (name, type) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
                 [checker.name, checker.type]
             );
+        }
+
+        // Insertar respuestas comunes
+        const defaultResponses = [
+            {page_name: 'aliexpress', code: '3d_secure', text: '3D Secure Authentication Required', action: 'retry'},
+            {page_name: 'aliexpress', code: 'insufficient_funds', text: 'Insufficient Funds', action: 'new_card'},
+            {page_name: 'amazon', code: 'cvv_incorrect', text: 'CVV incorrecto', action: 'retry'},
+            {page_name: 'mercadolibre', code: 'payment_declined', text: 'Pago no autorizado', action: 'contact_bank'},
+            {page_name: 'uber', code: 'requires_phone', text: 'Phone number verification required', action: 'verify_phone'}
+        ];
+        
+        for (const resp of defaultResponses) {
+            const pageResult = await pool.query(
+                'SELECT id FROM pages WHERE name = $1',
+                [resp.page_name]
+            );
+            
+            if (pageResult.rows[0]) {
+                await pool.query(
+                    `INSERT INTO page_responses (page_id, response_code, response_text, action_required) 
+                     VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING`,
+                    [pageResult.rows[0].id, resp.code, resp.text, resp.action]
+                );
+            }
         }
 
         // Crear usuario admin por defecto
@@ -535,9 +545,10 @@ const initDatabase = async () => {
 
         console.log('✅ Base de datos inicializada correctamente');
         console.log('📊 Estructura: 1 Usuario → N Cuentas → N Lives → N Pedidos');
-        console.log('📊 Estructura: 1 Usuario → N Dispositivos ↔ N Números');
+        console.log('📊 Estructura: 1 Usuario → N Dispositivos → N Números');
         console.log('📊 Estructura: Checkers → Gates → Lives');
         console.log('📊 Estructura: Páginas → Respuestas específicas');
+        console.log('👑 Usuario admin: admin / ' + (process.env.ADMIN_PASSWORD || 'admin123'));
 
     } catch (error) {
         console.error('❌ Error inicializando base de datos:', error);
@@ -546,5 +557,3 @@ const initDatabase = async () => {
 };
 
 module.exports = { pool, initDatabase };
-        
-      
