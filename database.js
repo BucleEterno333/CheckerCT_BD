@@ -139,8 +139,24 @@ const initDatabase = async () => {
         `);
 
         // ============================================
-        // 3. TABLAS DE DISPOSITIVOS Y NÚMEROS
+        // 3. TABLAS DE NÚMEROS Y DISPOSITIVOS
         // ============================================
+
+        // Tabla de NÚMEROS TELEFÓNICOS
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS phone_numbers (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER REFERENCES users(id) ON DELETE CASCADE NOT NULL,
+                telephone_company VARCHAR(100) NOT NULL, -- Telcel, AT&T, Movistar
+                phone_number VARCHAR(20) UNIQUE NOT NULL,
+                has_mobile_data BOOLEAN DEFAULT TRUE,
+                data_plan_gb INTEGER,
+                status VARCHAR(20) DEFAULT 'available', -- available, in_use, lost, blocked
+                assigned_at TIMESTAMP,
+                notes TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
         
         // Tabla de DISPOSITIVOS
         await pool.query(`
@@ -166,22 +182,7 @@ const initDatabase = async () => {
             )
         `);
 
-        // Tabla de NÚMEROS TELEFÓNICOS
-        await pool.query(`
-            CREATE TABLE IF NOT EXISTS phone_numbers (
-                id SERIAL PRIMARY KEY,
-                user_id INTEGER REFERENCES users(id) ON DELETE CASCADE NOT NULL,
-                telephone_company VARCHAR(100) NOT NULL, -- Telcel, AT&T, Movistar
-                phone_number VARCHAR(20) UNIQUE NOT NULL,
-                has_mobile_data BOOLEAN DEFAULT TRUE,
-                data_plan_gb INTEGER,
-                status VARCHAR(20) DEFAULT 'available', -- available, in_use, lost, blocked
-                current_device_id INTEGER REFERENCES devices(id),
-                assigned_at TIMESTAMP,
-                notes TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        `);
+
 
         // ============================================
         // 4. TABLAS DE CUENTAS Y LIVES
@@ -510,7 +511,7 @@ const initDatabase = async () => {
             {name: 'Shadow', type: 'premium'},
             {name: 'Cronos', type: 'premium'},
             {name: 'Moon', type: 'regular'}
-            
+
         ];
         
         for (const checker of defaultCheckers) {
