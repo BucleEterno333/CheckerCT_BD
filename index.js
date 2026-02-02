@@ -56,7 +56,7 @@ const startServer = async () => {
         console.log('✅ Base de datos lista');
 
         // INICIAR BOT DE TELEGRAM
-        const { bot } = require('./telegram-bot');
+        const { bot } = require('./bot_telegram');
         console.log('🤖 Bot de Telegram listo para recibir /start');
         
         app.listen(PORT, '0.0.0.0', () => {
