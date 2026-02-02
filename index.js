@@ -4,7 +4,7 @@ const cors = require('cors');
 const { initDatabase } = require('./database');
 
 const app = express();
-const PORT = process.env.PORT || 3001; // ✅ Cambiado a 3001
+const PORT = process.env.PORT || 8080; 
 
 // Middleware SIMPLIFICADO temporalmente
 app.use(cors()); // ✅ Permite todo temporalmente para debugging
