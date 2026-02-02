@@ -108,7 +108,7 @@ router.post('/register', trackActivity, async (req, res) => {
         );
         
         // IMPORTANTE: Guardar el bot aquí desde la configuración global
-        const { bot } = require('../telegram-bot');
+        const { bot } = require('../bot_telegram');
         let telegramSent = false;
         let telegramError = null;
         
@@ -260,7 +260,7 @@ router.post('/request-verification', trackActivity, async (req, res) => {
         );
         
         // Importar bot
-        const { bot } = require('../telegram-bot');
+        const { bot } = require('../bot_telegram');
         let telegramSent = false;
         let telegramError = null;
         
@@ -680,7 +680,7 @@ router.post('/forgot-password', trackActivity, async (req, res) => {
         );
         
         // Importar bot
-        const { bot } = require('../telegram-bot');
+        const { bot } = require('../bot_telegram');
         
         // Enviar por Telegram usando chat_id
         if (bot && user.telegram_chat_id) {
