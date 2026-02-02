@@ -95,14 +95,18 @@ bot.onText(/\/start/, async (msg) => {
         // Enviar mensaje de bienvenida
         await bot.sendMessage(
             chatId,
-            `👋 *¡Hola ${firstName}!*\n\n` +
-            `He guardado tu Chat ID: \`${chatId}\`\n\n` +
-            `*Ahora puedes registrarte en la web:*\n` +
-            `1. Ve a la página https://ciber7erroristaschk.com/login.html\n` +
-            `2. Usa tu usuario: *@${username}*\n` +
-            `3. Recibirás el código de verificación aquí\n\n` +
-            `꧁⎝ 𓆩༺✧༻𓆪 ⎠꧂¡Te esperamos! ꧁⎝ 𓆩༺✧༻𓆪 ⎠꧂`,
-            { parse_mode: 'Markdown' }
+            `👋 ¡Hola ${firstName}! 👋 \n\n` +
+            `He guardado tu Chat ID: <code>${chatId}</code>\n\n` +
+            `Ahora puedes registrarte en la web siguiendo estos pasos:\n\n` +
+            `1. Ve a la página:\n\n` +
+            `                 ꧁⎝ 𓆩༺✧༻𓆪 ⎠꧂\n` +
+            `https://ciber7erroristaschk.com/login.html\n` +
+            `                 ꧁⎝ 𓆩༺✧༻𓆪 ⎠꧂ \n\n` +
+            `2. Usa tu usuario: @${username}\n\n` +
+            `3. Recibirás un código de verificación aquí. \n\n` +
+            `4. Escríbelo en la página web, y comienza a livear y shippear ahora. \n\n` +
+            `                 👾 ¡Te esperamos! 👾`,
+            { parse_mode: 'HTML' }
         );
         
     } catch (error) {
