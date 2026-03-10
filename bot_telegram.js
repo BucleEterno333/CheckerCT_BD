@@ -208,6 +208,36 @@ async function sendVerificationCodeToUser(username, code) {
     }
 }
 
+// bot_telegram.js - Agregar al final, antes de module.exports
+
+// ============================================
+// FUNCIÓN PARA ENVIAR LIVE A UN CHAT ESPECÍFICO
+// ============================================
+async function sendLiveToTelegram(chatId, mensaje) {
+    try {
+        if (!chatId) {
+            return { success: false, error: 'chatId no proporcionado' };
+        }
+        
+        await bot.sendMessage(chatId, mensaje, {
+            parse_mode: 'Markdown'
+        });
+        
+        console.log(`✅ Live enviada a chat ID: ${chatId}`);
+        return { success: true };
+        
+    } catch (error) {
+        console.error('❌ Error enviando live a Telegram:', error);
+        return { 
+            success: false, 
+            error: error.message 
+        };
+    }
+}
+
+// Exportar la nueva función
+module.exports = { bot, sendVerificationCodeToUser, sendLiveToTelegram };
+
 // ========== EXPORTAR ==========
 module.exports = { bot, sendVerificationCodeToUser };
 

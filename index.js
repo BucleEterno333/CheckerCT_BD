@@ -41,12 +41,16 @@ const adminRoutes = require('./routes/admin');
 const sellerRoutes = require('./routes/seller');
 const livesRoutes = require('./routes/lives');
 const accountsRoutes = require('./routes/accounts');
+const telegramRoutes = require('./routes/telegram'); // 👈 NUEVA LÍNEA
+
 
 app.use('/api/auth', authRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/seller', sellerRoutes);
 app.use('/api/lives', livesRoutes);
 app.use('/api/accounts', accountsRoutes);
+app.use('/api/telegram', telegramRoutes); // 👈 NUEVA LÍNEA
+
 
 // Inicializar servidor
 const startServer = async () => {
