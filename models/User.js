@@ -253,78 +253,78 @@ class User {
     );
     
     return result.rows.length > 0;
-}
-
-// Generar código de verificación
-static async generateVerificationCode(userId) {
-    const code = crypto.randomInt(100000, 999999).toString();
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutos
-    
-    await pool.query(
-        `INSERT INTO verification_codes 
-         (user_id, code, expires_at)
-         VALUES ($1, $2, $3)`,
-        [userId, code, expiresAt]
-    );
-    
-    return code;
-}
-
-// Verificar código
-static async verifyCode(username, code) {
-    const result = await pool.query(
-        `SELECT u.id, vc.expires_at
-         FROM users u
-         JOIN verification_codes vc ON u.id = vc.user_id
-         WHERE u.username = $1 AND vc.code = $2 AND vc.used = FALSE
-         ORDER BY vc.created_at DESC
-         LIMIT 1`,
-        [username, code]
-    );
-    
-    if (result.rows.length === 0) {
-        return { valid: false, error: 'Código incorrecto' };
     }
-    
-    const { id, expires_at } = result.rows[0];
-    
-    if (new Date(expires_at) < new Date()) {
-        return { valid: false, error: 'Código expirado' };
-    }
-    
-    // Activar usuario
-    await pool.query(
-        `UPDATE users 
-         SET is_active = TRUE, 
-             telegram_verified = TRUE,
-             verified_at = NOW()
-         WHERE id = $1`,
-        [id]
-    );
-    
-    // Marcar código como usado
-    await pool.query(
-        'UPDATE verification_codes SET used = TRUE WHERE user_id = $1 AND code = $2',
-        [id, code]
-    );
-    
-    return { valid: true, userId: id };
-}
 
-// Obtener estadísticas de verificación
-static async getVerificationStats() {
-    const result = await pool.query(`
-        SELECT 
-            COUNT(*) as total_users,
-            COUNT(CASE WHEN is_active = TRUE THEN 1 END) as active_users,
-            COUNT(CASE WHEN telegram_verified = TRUE THEN 1 END) as telegram_verified,
-            COUNT(CASE WHEN is_active = FALSE THEN 1 END) as pending_verification,
-            AVG(EXTRACT(EPOCH FROM (verified_at - created_at))) as avg_verification_time_seconds
-        FROM users
-    `);
-    
-    return result.rows[0];
-}
+    // Generar código de verificación
+    static async generateVerificationCode(userId) {
+        const code = crypto.randomInt(100000, 999999).toString();
+        const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutos
+        
+        await pool.query(
+            `INSERT INTO verification_codes 
+            (user_id, code, expires_at)
+            VALUES ($1, $2, $3)`,
+            [userId, code, expiresAt]
+        );
+        
+        return code;
+    }
+
+    // Verificar código
+    static async verifyCode(username, code) {
+        const result = await pool.query(
+            `SELECT u.id, vc.expires_at
+            FROM users u
+            JOIN verification_codes vc ON u.id = vc.user_id
+            WHERE u.username = $1 AND vc.code = $2 AND vc.used = FALSE
+            ORDER BY vc.created_at DESC
+            LIMIT 1`,
+            [username, code]
+        );
+        
+        if (result.rows.length === 0) {
+            return { valid: false, error: 'Código incorrecto' };
+        }
+        
+        const { id, expires_at } = result.rows[0];
+        
+        if (new Date(expires_at) < new Date()) {
+            return { valid: false, error: 'Código expirado' };
+        }
+        
+        // Activar usuario
+        await pool.query(
+            `UPDATE users 
+            SET is_active = TRUE, 
+                telegram_verified = TRUE,
+                verified_at = NOW()
+            WHERE id = $1`,
+            [id]
+        );
+        
+        // Marcar código como usado
+        await pool.query(
+            'UPDATE verification_codes SET used = TRUE WHERE user_id = $1 AND code = $2',
+            [id, code]
+        );
+        
+        return { valid: true, userId: id };
+    }
+
+    // Obtener estadísticas de verificación
+    static async getVerificationStats() {
+        const result = await pool.query(`
+            SELECT 
+                COUNT(*) as total_users,
+                COUNT(CASE WHEN is_active = TRUE THEN 1 END) as active_users,
+                COUNT(CASE WHEN telegram_verified = TRUE THEN 1 END) as telegram_verified,
+                COUNT(CASE WHEN is_active = FALSE THEN 1 END) as pending_verification,
+                AVG(EXTRACT(EPOCH FROM (verified_at - created_at))) as avg_verification_time_seconds
+            FROM users
+        `);
+        
+        return result.rows[0];
+    }
 
     // Obtener transacciones de un seller
     static async getSellerTransactions(sellerId, page = 1, limit = 20) {
@@ -342,6 +342,22 @@ static async getVerificationStats() {
         );
         
         return result.rows;
+    }
+
+    static async incrementCookieCount(userId) {
+        const result = await pool.query(
+            'UPDATE users SET cookies_generated = cookies_generated + 1 WHERE id = $1 RETURNING cookies_generated',
+            [userId]
+        );
+        return result.rows[0]?.cookies_generated;
+    }
+
+    static async getCookieCount(userId) {
+        const result = await pool.query(
+            'SELECT cookies_generated FROM users WHERE id = $1',
+            [userId]
+        );
+        return result.rows[0]?.cookies_generated || 0;
     }
 }
 

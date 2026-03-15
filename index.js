@@ -20,7 +20,8 @@ app.get('/', (req, res) => {
             '/api/auth/login',
             '/api/auth/register',
             '/api/lives',
-            '/api/accounts'
+            '/api/accounts',
+            '/api/user'
         ]
     });
 });
@@ -42,7 +43,7 @@ const sellerRoutes = require('./routes/seller');
 const livesRoutes = require('./routes/lives');
 const accountsRoutes = require('./routes/accounts');
 const telegramRoutes = require('./routes/telegram'); // 👈 NUEVA LÍNEA
-
+const userRoutes = require ('./routes/user')
 
 app.use('/api/auth', authRoutes);
 app.use('/api/admin', adminRoutes);
@@ -50,6 +51,8 @@ app.use('/api/seller', sellerRoutes);
 app.use('/api/lives', livesRoutes);
 app.use('/api/accounts', accountsRoutes);
 app.use('/api/telegram', telegramRoutes); // 👈 NUEVA LÍNEA
+app.use('/api/user', userRoutes); // 👈 NUEVA LÍNEA
+
 
 
 // Inicializar servidor
