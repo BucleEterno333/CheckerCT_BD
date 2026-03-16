@@ -7,7 +7,11 @@ const app = express();
 const PORT = process.env.PORT || 8080; 
 
 // Middleware SIMPLIFICADO temporalmente
-app.use(cors()); // ✅ Permite todo temporalmente para debugging
+app.use(cors({
+    origin: 'https://ciber7erroristaschk.com',
+    credentials: true,
+    optionsSuccessStatus: 200
+}));
 app.use(express.json());
 
 // RUTA RAIZ - IMPORTANTE
