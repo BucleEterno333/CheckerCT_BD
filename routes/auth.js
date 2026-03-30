@@ -98,7 +98,7 @@ router.post('/register', trackActivity, async (req, res) => {
         
         // Generar código de verificación
         const verificationCode = crypto.randomInt(100000, 999999).toString();
-        const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutos
+        const expiresAt = new Date(Date.now() + 2 * 60 * 1000); // 2 minutos
         
         await client.query(
             `INSERT INTO verification_codes 
@@ -120,7 +120,7 @@ router.post('/register', trackActivity, async (req, res) => {
                     `🔐 *Código de verificación - CiberTerroristasCHK*\n\n` +
                     `Para completar tu registro:\n\n` +
                     `Código: *${verificationCode}*\n` +
-                    `⏰ Válido por 10 minutos\n\n` +
+                    `⏰ Válido por 2 minutos\n\n` +
                     `Ingresa este código en la página web.\n\n` +
                     `⚠️ *No compartas este código con nadie.*`,
                     { parse_mode: 'Markdown' }
@@ -272,7 +272,7 @@ router.post('/request-verification', trackActivity, async (req, res) => {
                     `🔐 *Nuevo código de verificación*\n\n` +
                     `Solicitaste un nuevo código.\n\n` +
                     `Código: *${verificationCode}*\n` +
-                    `⏰ Válido por 10 minutos\n\n` +
+                    `⏰ Válido por 2 minutos\n\n` +
                     `⚠️ *No compartas este código con nadie.*`,
                     { parse_mode: 'Markdown' }
                 );

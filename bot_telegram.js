@@ -235,10 +235,9 @@ async function sendLiveToTelegram(chatId, mensaje) {
     }
 }
 
-// Exportar la nueva función
+// Exportar 
 module.exports = { bot, sendVerificationCodeToUser, sendLiveToTelegram };
 
-// ========== EXPORTAR ==========
-module.exports = { bot, sendVerificationCodeToUser };
+
 
 console.log('✅ Bot configurado correctamente');
