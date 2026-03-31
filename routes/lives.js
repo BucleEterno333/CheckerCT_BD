@@ -331,77 +331,63 @@ router.post('/pages/:pageId/responses', requireRole('admin'), async (req, res) =
     }
 });
 
-// ========== RUTAS PARA LAS LIVES DE EJEMPLO ==========
 
-// Endpoint especial para crear lives de ejemplo
-router.post('/examples/create', trackActivity, async (req, res) => {
+
+// Eliminar una live (solo si pertenece al usuario)
+router.delete('/:liveId', async (req, res) => {
     try {
-        const examples = [
-            {
-                card_full: '5499490562982165|05|2030|895',
-                actions: [
-                    { type: 'live_obtained', page_name: 'Amazon MX', notes: 'live de amazon mx' },
-                    { type: 'live_obtained', page_name: 'Shadow Dragon', notes: 'live de shadow dragon' },
-                    { type: 'associated_account', page_name: 'AliExpress', notes: 'asociaste en aliexpress en poco f7 y sí está jalando compras', device_used: 'Poco F7' },
-                    { type: 'payment_declined', page_name: 'Miatt', amount: 50, notes: 'no pasó $50 en miatt xd' }
-                ]
-            },
-            {
-                card_full: '5499490562980557|05|2030|351',
-                actions: [
-                    { type: 'live_obtained', page_name: 'Amazon MX', notes: 'live de amazon mx' },
-                    { type: 'live_obtained', page_name: 'Shadow Dragon', notes: 'live de shadow dragon' },
-                    { type: 'transferred_to_other', page_name: 'AliExpress', transferred_to: 'Yakoo', notes: 'pasaste a Yakoo para aliexpress pero nunca caló' }
-                ]
-            },
-            {
-                card_full: '5546259010306068|03|2026|919',
-                actions: [
-                    { type: 'live_obtained', page_name: 'Shadow Dragon', notes: 'live de shadow dragon' },
-                    { type: 'associated_account', page_name: 'AliExpress', notes: 'está asociada en aliexpress de creo celular amarillo de draco', device_used: 'Celular amarillo de Draco' }
-                ]
-            }
-        ];
-        
-        const createdLives = [];
-        
-        for (const example of examples) {
-            // Crear la live
-            const live = await Live.create(req.user.id, {
-                card_full: example.card_full,
-                gate_used: 'Ejemplo',
-                check_date: new Date().toISOString().split('T')[0],
-                notes: 'Live de ejemplo creada automáticamente'
-            });
-            
-            // Añadir acciones
-            for (const actionData of example.actions) {
-                await Live.addAction({
-                    live_id: live.id,
-                    user_id: req.user.id,
-                    action_type: actionData.type,
-                    page_name: actionData.page_name,
-                    amount: actionData.amount,
-                    transferred_to: actionData.transferred_to,
-                    device_used: actionData.device_used,
-                    action_date: new Date().toISOString().split('T')[0],
-                    notes: actionData.notes
-                });
-            }
-            
-            createdLives.push(live.id);
+        const { liveId } = req.params;
+        const result = await pool.query(
+            'DELETE FROM user_lives WHERE id = $1 AND user_id = $2 RETURNING id',
+            [liveId, req.user.id]
+        );
+        if (result.rows.length === 0) {
+            return res.status(404).json({ success: false, error: 'Live no encontrada' });
         }
-        
-        res.json({
-            success: true,
-            message: 'Lives de ejemplo creadas exitosamente',
-            live_ids: createdLives
-        });
-        
+        res.json({ success: true, message: 'Live eliminada' });
     } catch (error) {
-        console.error('Error creando ejemplos:', error);
+        console.error('Error eliminando live:', error);
         res.status(500).json({ success: false, error: error.message });
     }
 });
+
+// Actualizar una live
+router.put('/:liveId', async (req, res) => {
+    try {
+        const { liveId } = req.params;
+        const { card_full, gate_used, bank_name, country, card_type, device_name, check_date, status, phase, notes } = req.body;
+        
+        // Validar que la live pertenezca al usuario
+        const check = await pool.query('SELECT id FROM user_lives WHERE id = $1 AND user_id = $2', [liveId, req.user.id]);
+        if (check.rows.length === 0) {
+            return res.status(404).json({ success: false, error: 'Live no encontrada' });
+        }
+        
+        // Actualizar campos
+        const result = await pool.query(
+            `UPDATE user_lives 
+             SET card_full = COALESCE($1, card_full),
+                 gate_used = COALESCE($2, gate_used),
+                 bank_name = COALESCE($3, bank_name),
+                 country = COALESCE($4, country),
+                 card_type = COALESCE($5, card_type),
+                 device_name = COALESCE($6, device_name),
+                 check_date = COALESCE($7, check_date),
+                 status = COALESCE($8, status),
+                 phase = COALESCE($9, phase),
+                 notes = COALESCE($10, notes),
+                 updated_at = NOW()
+             WHERE id = $11
+             RETURNING *`,
+            [card_full, gate_used, bank_name, country, card_type, device_name, check_date, status, phase, notes, liveId]
+        );
+        res.json({ success: true, live: result.rows[0] });
+    } catch (error) {
+        console.error('Error actualizando live:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+
 
 module.exports = router;
