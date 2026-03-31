@@ -4,7 +4,7 @@ const { pool } = require('../database');
 class Live {
     // Crear una nueva live
     static async create(userId, cardData) {
-        const { card_full, gate_used, check_date, notes = '' } = cardData;
+        const { card_full, gate_name, check_date, notes = '' } = cardData;
         
         // Extraer información de la tarjeta
         const cardNumber = card_full.split('|')[0];
@@ -13,15 +13,15 @@ class Live {
         
         const result = await pool.query(
             `INSERT INTO user_lives 
-             (user_id, card_full, card_last_four, card_bin, gate_used, check_date, notes, created_at)
+             (user_id, card_full, card_last_four, card_bin, gate_name, check_date, notes, created_at)
              VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
-             RETURNING id, card_last_four, card_bin, gate_used, check_date`,
+             RETURNING id, card_last_four, card_bin, gate_name, check_date`,
             [
                 userId,
                 card_full,
                 card_last_four,
                 card_bin,
-                gate_used,
+                gate_name,
                 check_date || new Date().toISOString().split('T')[0],
                 notes
             ]
@@ -54,7 +54,7 @@ class Live {
         }
         
         if (gate) {
-            query += ` AND ul.gate_used = $${paramIndex}`;
+            query += ` AND ul.gate_name = $${paramIndex}`;
             params.push(gate);
             paramIndex++;
         }

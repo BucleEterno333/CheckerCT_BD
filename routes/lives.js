@@ -21,7 +21,7 @@ router.get('/', async (req, res) => {
         
         // Obtener estadísticas para filtros
         const gatesResult = await pool.query(
-            'SELECT DISTINCT gate_used FROM user_lives WHERE user_id = $1 ORDER BY gate_used',
+            'SELECT DISTINCT gate_name FROM user_lives WHERE user_id = $1 ORDER BY gate_name',
             [req.user.id]
         );
         
@@ -57,12 +57,12 @@ router.post('/', trackActivity, async (req, res) => {
         if (!card_full || !gate_used) {
             return res.status(400).json({
                 success: false,
-                error: 'card_full y gate_used son requeridos'
+                error: 'card_full y gate_name son requeridos'
             });
         }
         
         const live = await Live.create(req.user.id, {
-            card_full, gate_used, check_date, notes
+            card_full, gate_name, check_date, notes
         });
         
         // Crear acción automática de "live obtenida"
@@ -367,7 +367,7 @@ router.put('/:liveId', async (req, res) => {
         const result = await pool.query(
             `UPDATE user_lives 
              SET card_full = COALESCE($1, card_full),
-                 gate_used = COALESCE($2, gate_used),
+                 gate_name = COALESCE($2, gate_name),
                  bank_name = COALESCE($3, bank_name),
                  country = COALESCE($4, country),
                  card_type = COALESCE($5, card_type),
