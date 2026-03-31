@@ -4,7 +4,7 @@ const router = express.Router();
 const { authenticate, requireRole, trackActivity } = require('../middleware/auth');
 const Live = require('../models/Live');
 const Account = require('../models/Account');
-
+const { pool } = require('../database');
 // Todas las rutas requieren autenticación
 router.use(authenticate);
 
