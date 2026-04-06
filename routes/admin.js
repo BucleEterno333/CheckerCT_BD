@@ -3,9 +3,150 @@ const express = require('express');
 const router = express.Router();
 const { authenticate, requireRole, trackActivity } = require('../middleware/auth');
 const User = require('../models/User');
+const { pool } = require('../database');
+
+
 
 // Todas las rutas requieren autenticación
 router.use(authenticate);
+
+// Obtener un usuario por ID (admin only)
+router.get('/users/:userId', requireRole('admin'), async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const result = await pool.query(
+            `SELECT id, username, display_name, credits, days_remaining, role, 
+                    is_active, created_at, last_login, telegram_username, telegram_verified
+             FROM users WHERE id = $1`,
+            [userId]
+        );
+        if (result.rows.length === 0) {
+            return res.status(404).json({ success: false, error: 'Usuario no encontrado' });
+        }
+        res.json({ success: true, user: result.rows[0] });
+    } catch (error) {
+        console.error('Error obteniendo usuario:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// ========== ACTUALIZAR CRÉDITOS DE USUARIO (establecer valor absoluto) ==========
+router.put('/users/:userId/credits', requireRole('admin'), trackActivity, async (req, res) => {
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        const { userId } = req.params;
+        const { credits, reason = '' } = req.body;
+
+        if (credits === undefined || credits < 0) {
+            return res.status(400).json({ success: false, error: 'Créditos inválidos' });
+        }
+
+        // Obtener usuario actual
+        const userResult = await client.query(
+            'SELECT id, username, credits FROM users WHERE id = $1 FOR UPDATE',
+            [userId]
+        );
+        if (userResult.rows.length === 0) {
+            return res.status(404).json({ success: false, error: 'Usuario no encontrado' });
+        }
+
+        const user = userResult.rows[0];
+        const oldCredits = user.credits;
+        const newCredits = parseInt(credits);
+        const amount = newCredits - oldCredits;
+
+        // Actualizar créditos
+        await client.query(
+            'UPDATE users SET credits = $1, updated_at = NOW() WHERE id = $2',
+            [newCredits, userId]
+        );
+
+        // Registrar transacción solo si hubo cambio
+        if (amount !== 0) {
+            await client.query(
+                `INSERT INTO credit_transactions 
+                 (from_user_id, to_user_id, transaction_type, amount, previous_amount, new_amount, reason, created_at)
+                 VALUES ($1, $2, 'credits', $3, $4, $5, $6, NOW())`,
+                [req.user.id, userId, amount, oldCredits, newCredits, reason || `Ajuste por administrador`]
+            );
+        }
+
+        await client.query('COMMIT');
+        res.json({ success: true, message: 'Créditos actualizados', old: oldCredits, new: newCredits });
+    } catch (error) {
+        await client.query('ROLLBACK');
+        console.error('Error actualizando créditos:', error);
+        res.status(500).json({ success: false, error: error.message });
+    } finally {
+        client.release();
+    }
+});
+
+// ========== ACTUALIZAR DÍAS DE USUARIO (establecer valor absoluto) ==========
+router.put('/users/:userId/days', requireRole('admin'), trackActivity, async (req, res) => {
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        const { userId } = req.params;
+        const { days, reason = '' } = req.body;
+
+        if (days === undefined || days < 0) {
+            return res.status(400).json({ success: false, error: 'Días inválidos' });
+        }
+
+        const userResult = await client.query(
+            'SELECT id, username, days_remaining FROM users WHERE id = $1 FOR UPDATE',
+            [userId]
+        );
+        if (userResult.rows.length === 0) {
+            return res.status(404).json({ success: false, error: 'Usuario no encontrado' });
+        }
+
+        const user = userResult.rows[0];
+        const oldDays = user.days_remaining;
+        const newDays = parseInt(days);
+        const amount = newDays - oldDays;
+
+        await client.query(
+            'UPDATE users SET days_remaining = $1, updated_at = NOW() WHERE id = $2',
+            [newDays, userId]
+        );
+
+        if (amount !== 0) {
+            await client.query(
+                `INSERT INTO credit_transactions 
+                 (from_user_id, to_user_id, transaction_type, amount, previous_amount, new_amount, reason, created_at)
+                 VALUES ($1, $2, 'days', $3, $4, $5, $6, NOW())`,
+                [req.user.id, userId, amount, oldDays, newDays, reason || `Ajuste por administrador`]
+            );
+        }
+
+        await client.query('COMMIT');
+        res.json({ success: true, message: 'Días actualizados', old: oldDays, new: newDays });
+    } catch (error) {
+        await client.query('ROLLBACK');
+        console.error('Error actualizando días:', error);
+        res.status(500).json({ success: false, error: error.message });
+    } finally {
+        client.release();
+    }
+});
+
+// ========== OBTENER DETALLE DE UN USUARIO ==========
+router.get('/users/:userId', requireRole('admin'), async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({ success: false, error: 'Usuario no encontrado' });
+        }
+        res.json({ success: true, user });
+    } catch (error) {
+        console.error('Error obteniendo usuario:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
 
 // ========== RUTAS DE ADMINISTRADOR ==========
 
