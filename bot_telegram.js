@@ -1,6 +1,6 @@
 // ============================================
 // BOT DE TELEGRAM - CIBERTERRORISTAS CHK
-// Versión corregida: usa telegram_id y API interna
+// Versión corregida: manejo de usuarios por telegram_id/username
 // ============================================
 
 const TelegramBot = require('node-telegram-bot-api');
@@ -8,27 +8,12 @@ const { pool } = require('./database');
 
 // ========== CONFIGURACIÓN ==========
 const token = process.env.TELEGRAM_BOT_TOKEN;
-const INTERNAL_API_URL = process.env.INTERNAL_API_URL; // API interna
-const BOT_API_KEY = process.env.BOT_API_KEY;
-const API_GENCOOKIE_URL = process.env.API_GENCOOKIE_URL;
+const INTERNAL_API_URL = process.env.INTERNAL_API_URL || 'http://basedatos:8080/api';
+const BOT_API_KEY = process.env.BOT_API_KEY || 'AALOL23894238HWKEJSNFSDGF';
+const API_GENCOOKIE_URL = process.env.API_GENCOOKIE_URL || 'https://p01--gencookie--2bcj5drfqjzx.code.run';
 
 if (!token) {
     console.error('❌ ERROR: TELEGRAM_BOT_TOKEN no configurado');
-    process.exit(1);
-}
-
-if (!INTERNAL_API_URL) {
-    console.error('❌ ERROR: INTERNAL_API_URL no configurada');
-    process.exit(1);
-}   
-
-if (!BOT_API_KEY) {
-    console.error('❌ ERROR: BOT_API_KEY no configurada');
-    process.exit(1);
-}       
-
-if (!API_GENCOOKIE_URL) {
-    console.error('❌ ERROR: API_GENCOOKIE_URL no configurada');
     process.exit(1);
 }
 
@@ -37,7 +22,6 @@ console.log('🤖 Bot de Telegram inicializado');
 
 // ========== FUNCIONES AUXILIARES ==========
 
-// Obtener usuario por telegram_id
 async function getUserByTelegramId(telegramId) {
     const res = await pool.query(
         'SELECT id, username, credits, days_remaining FROM users WHERE telegram_id = $1',
@@ -46,30 +30,54 @@ async function getUserByTelegramId(telegramId) {
     return res.rows[0];
 }
 
-// Crear o actualizar usuario (usa telegram_id como clave)
+// Función corregida para evitar duplicados por username
 async function upsertUser(telegramId, username, chatId, chatType) {
     const now = new Date();
+    // 1. Buscar por telegram_id
+    let user = await pool.query('SELECT id, username FROM users WHERE telegram_id = $1', [telegramId]);
+    if (user.rows.length > 0) {
+        // Ya existe con ese telegram_id, solo actualizar chat_id si es privado
+        if (chatType === 'private') {
+            await pool.query(
+                'UPDATE users SET telegram_chat_id = $1, updated_at = $2 WHERE telegram_id = $3',
+                [chatId, now, telegramId]
+            );
+        }
+        return;
+    }
+    // 2. Buscar por username (por si ya se registró desde la web)
+    user = await pool.query('SELECT id, username FROM users WHERE username = $1', [username]);
+    if (user.rows.length > 0) {
+        // Actualizar el registro existente con el telegram_id y chat_id
+        if (chatType === 'private') {
+            await pool.query(
+                'UPDATE users SET telegram_id = $1, telegram_chat_id = $2, telegram_username = $3, updated_at = $4 WHERE username = $5',
+                [telegramId, chatId, username, now, username]
+            );
+        } else {
+            await pool.query(
+                'UPDATE users SET telegram_id = $1, telegram_username = $2, updated_at = $3 WHERE username = $4',
+                [telegramId, username, now, username]
+            );
+        }
+        return;
+    }
+    // 3. No existe, insertar nuevo
     if (chatType === 'private') {
         await pool.query(
             `INSERT INTO users (telegram_id, telegram_username, telegram_chat_id, username, created_at)
-             VALUES ($1, $2, $3, $4, $5)
-             ON CONFLICT (telegram_id) DO UPDATE 
-             SET telegram_chat_id = $3, telegram_username = $2, username = $4, updated_at = $5`,
+             VALUES ($1, $2, $3, $4, $5)`,
             [telegramId, username, chatId, username, now]
         );
     } else {
-        // En grupos no guardamos chat_id (para no mezclar)
         await pool.query(
             `INSERT INTO users (telegram_id, telegram_username, username, created_at)
-             VALUES ($1, $2, $3, $4)
-             ON CONFLICT (telegram_id) DO UPDATE 
-             SET telegram_username = $2, username = $3, updated_at = $4`,
+             VALUES ($1, $2, $3, $4)`,
             [telegramId, username, username, now]
         );
     }
 }
 
-// Descontar créditos llamando a la API interna
 async function deductCredits(telegramId, amount = 3) {
     try {
         const controller = new AbortController();
@@ -94,31 +102,7 @@ async function deductCredits(telegramId, amount = 3) {
     }
 }
 
-// Verificar créditos llamando a la API interna
-async function checkCredits(telegramId, required = 3) {
-    try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 15000);
-        const response = await fetch(`${INTERNAL_API_URL}/user/bot/check-credits`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                telegram_id: telegramId,
-                bot_key: BOT_API_KEY
-            }),
-            signal: controller.signal
-        });
-        clearTimeout(timeoutId);
-        const data = await response.json();
-        if (data.success && data.credits >= required) return true;
-        return false;
-    } catch (error) {
-        console.error('Error en checkCredits:', error);
-        return false;
-    }
-}
-
-// ========== LIMPIADOR DE TARJETAS (extrae formato 16|MM|AAAA|CVV) ==========
+// ========== LIMPIADOR DE TARJETAS ==========
 function limpiarTarjetas(textoSucio) {
     const textoLimpio = textoSucio
         .replace(/\u200b/g, '')
@@ -141,7 +125,6 @@ function limpiarTarjetas(textoSucio) {
     return [...new Set(tarjetas)];
 }
 
-// ========== VERIFICACIÓN DE TARJETAS EN AMAZON ==========
 async function verificarTarjetasAmazon(tarjetas, cookies) {
     const resultados = [];
     for (const card of tarjetas) {
@@ -167,7 +150,6 @@ async function verificarTarjetasAmazon(tarjetas, cookies) {
 
 // ========== COMANDOS ==========
 
-// /start – Vincular cuenta y mostrar estado
 bot.onText(/\/start/, async (msg) => {
     const chatId = msg.chat.id;
     const from = msg.from;
@@ -214,7 +196,6 @@ bot.onText(/\/start/, async (msg) => {
     }
 });
 
-// /gencookie <país>
 bot.onText(/\/gencookie\s+(\w+)/i, async (msg, match) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
@@ -254,14 +235,12 @@ bot.onText(/\/gencookie\s+(\w+)/i, async (msg, match) => {
     }
 });
 
-// /gen <patrón> [cantidad]
 bot.onText(/\/gen\s+([^\s|]+\|\d{2}\|\d{2,4})(?:\s+(\d+))?/, async (msg, match) => {
     const chatId = msg.chat.id;
     let patron = match[1];
     let cantidad = match[2] ? parseInt(match[2]) : 10;
     if (cantidad > 50) cantidad = 50;
     try {
-        // Implementación básica (puedes mejorarla)
         const partes = patron.split('|');
         let [numBase, mes, año] = partes;
         const cvv = partes[3] || 'rnd';
@@ -287,7 +266,6 @@ bot.onText(/\/gen\s+([^\s|]+\|\d{2}\|\d{2,4})(?:\s+(\d+))?/, async (msg, match) 
     }
 });
 
-// /limpiador – Extraer tarjetas de texto sucio
 bot.onText(/\/limpiador/, async (msg) => {
     const chatId = msg.chat.id;
     await bot.sendMessage(chatId, '📝 Envía el texto sucio:');
@@ -306,15 +284,12 @@ bot.onText(/\/limpiador/, async (msg) => {
     bot.on('message', listener);
 });
 
-// /extrapolador <bin>
 bot.onText(/\/extrapolador\s+(\d{6})/, async (msg, match) => {
     const chatId = msg.chat.id;
     const bin = match[1];
     await bot.sendMessage(chatId, `🔍 Búsqueda para BIN ${bin} (próximamente).`);
-    // Aquí conectarías con tu servicio de extrapolador
 });
 
-// /chk amazon – Verificar tarjetas en Amazon
 bot.onText(/\/chk\s+amazon(?:\s+(.+))?/i, async (msg, match) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
@@ -365,7 +340,6 @@ async function procesarChkAmazon(chatId, telegramId, rawText) {
     }
 }
 
-// /creditos
 bot.onText(/\/creditos|\/credits|\/saldo|\/dias/, async (msg) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
@@ -378,21 +352,18 @@ bot.onText(/\/creditos|\/credits|\/saldo|\/dias/, async (msg) => {
     }
 });
 
-// /renovar
 bot.onText(/\/renovar/, async (msg) => {
     const chatId = msg.chat.id;
     const adminUser = 'C1ber7errorist4sBot';
     await bot.sendMessage(chatId, `🔄 *Renovación*\nContacta a [@${adminUser}](https://t.me/${adminUser})`, { parse_mode: 'Markdown', disable_web_page_preview: true });
 });
 
-// /id
 bot.onText(/\/id/, async (msg) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
     await bot.sendMessage(chatId, `📋 *Tu ID:* \`${telegramId}\``, { parse_mode: 'Markdown' });
 });
 
-// /help
 bot.onText(/\/help/, async (msg) => {
     const chatId = msg.chat.id;
     const helpText = 
@@ -410,7 +381,6 @@ bot.onText(/\/help/, async (msg) => {
     await bot.sendMessage(chatId, helpText, { parse_mode: 'Markdown' });
 });
 
-// /menu – Menú interactivo (opcional)
 bot.onText(/\/menu/, async (msg) => {
     const chatId = msg.chat.id;
     const opts = {
