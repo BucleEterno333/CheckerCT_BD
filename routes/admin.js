@@ -29,23 +29,27 @@ router.get('/users/:userId', requireRole('admin'), async (req, res) => {
         res.status(500).json({ success: false, error: error.message });
     }
 });
-
-// ========== ACTUALIZAR CRÉDITOS DE USUARIO (establecer valor absoluto) ==========
+// ACTUALIZAR CRÉDITOS
 router.put('/users/:userId/credits', requireRole('admin'), trackActivity, async (req, res) => {
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
         const { userId } = req.params;
-        const { credits, reason = '' } = req.body;
+        let { credits, reason = '' } = req.body;
 
-        if (credits === undefined || credits < 0) {
+        // Convertir a número entero
+        const newCredits = parseInt(credits, 10);
+        if (isNaN(newCredits) || newCredits < 0) {
             return res.status(400).json({ success: false, error: 'Créditos inválidos' });
         }
+
+        const userIdInt = parseInt(userId, 10);
+        const adminId = req.user.id;
 
         // Obtener usuario actual
         const userResult = await client.query(
             'SELECT id, username, credits FROM users WHERE id = $1 FOR UPDATE',
-            [userId]
+            [userIdInt]
         );
         if (userResult.rows.length === 0) {
             return res.status(404).json({ success: false, error: 'Usuario no encontrado' });
@@ -53,22 +57,20 @@ router.put('/users/:userId/credits', requireRole('admin'), trackActivity, async 
 
         const user = userResult.rows[0];
         const oldCredits = user.credits;
-        const newCredits = parseInt(credits);
         const amount = newCredits - oldCredits;
 
         // Actualizar créditos
         await client.query(
             'UPDATE users SET credits = $1, updated_at = NOW() WHERE id = $2',
-            [newCredits, userId]
+            [newCredits, userIdInt]
         );
 
-        // Registrar transacción solo si hubo cambio
         if (amount !== 0) {
             await client.query(
                 `INSERT INTO credit_transactions 
                  (from_user_id, to_user_id, transaction_type, amount, previous_amount, new_amount, reason, created_at)
                  VALUES ($1, $2, 'credits', $3, $4, $5, $6, NOW())`,
-                [req.user.id, userId, amount, oldCredits, newCredits, reason || `Ajuste por administrador`]
+                [adminId, userIdInt, amount, oldCredits, newCredits, reason || 'Ajuste por administrador']
             );
         }
 
@@ -83,21 +85,25 @@ router.put('/users/:userId/credits', requireRole('admin'), trackActivity, async 
     }
 });
 
-// ========== ACTUALIZAR DÍAS DE USUARIO (establecer valor absoluto) ==========
+// ACTUALIZAR DÍAS
 router.put('/users/:userId/days', requireRole('admin'), trackActivity, async (req, res) => {
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
         const { userId } = req.params;
-        const { days, reason = '' } = req.body;
+        let { days, reason = '' } = req.body;
 
-        if (days === undefined || days < 0) {
+        const newDays = parseInt(days, 10);
+        if (isNaN(newDays) || newDays < 0) {
             return res.status(400).json({ success: false, error: 'Días inválidos' });
         }
 
+        const userIdInt = parseInt(userId, 10);
+        const adminId = req.user.id;
+
         const userResult = await client.query(
             'SELECT id, username, days_remaining FROM users WHERE id = $1 FOR UPDATE',
-            [userId]
+            [userIdInt]
         );
         if (userResult.rows.length === 0) {
             return res.status(404).json({ success: false, error: 'Usuario no encontrado' });
@@ -105,12 +111,11 @@ router.put('/users/:userId/days', requireRole('admin'), trackActivity, async (re
 
         const user = userResult.rows[0];
         const oldDays = user.days_remaining;
-        const newDays = parseInt(days);
         const amount = newDays - oldDays;
 
         await client.query(
             'UPDATE users SET days_remaining = $1, updated_at = NOW() WHERE id = $2',
-            [newDays, userId]
+            [newDays, userIdInt]
         );
 
         if (amount !== 0) {
@@ -118,7 +123,7 @@ router.put('/users/:userId/days', requireRole('admin'), trackActivity, async (re
                 `INSERT INTO credit_transactions 
                  (from_user_id, to_user_id, transaction_type, amount, previous_amount, new_amount, reason, created_at)
                  VALUES ($1, $2, 'days', $3, $4, $5, $6, NOW())`,
-                [req.user.id, userId, amount, oldDays, newDays, reason || `Ajuste por administrador`]
+                [adminId, userIdInt, amount, oldDays, newDays, reason || 'Ajuste por administrador']
             );
         }
 
