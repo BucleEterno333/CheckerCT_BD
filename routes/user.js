@@ -9,7 +9,46 @@ const { pool } = require('../database');
 // Todas las rutas requieren autenticación
 router.use(authenticate);
 
+// POST /api/user/bot/use-credits
+router.post('/bot/use-credits', async (req, res) => {
+    const { telegram_id, amount, bot_key } = req.body;
+    if (bot_key !== process.env.BOT_API_KEY) return res.status(401).json({ success: false, error: 'No autorizado' });
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        const userRes = await client.query('SELECT id, credits FROM users WHERE telegram_id = $1 FOR UPDATE', [telegram_id]);
+        if (userRes.rows.length === 0) throw new Error('Usuario no encontrado');
+        const user = userRes.rows[0];
+        if (user.credits < amount) throw new Error('Créditos insuficientes');
+        const newCredits = user.credits - amount;
+        await client.query('UPDATE users SET credits = $1 WHERE id = $2', [newCredits, user.id]);
+        await client.query(
+            `INSERT INTO credit_transactions (to_user_id, transaction_type, amount, previous_amount, new_amount, reason)
+             VALUES ($1, 'cookie_generation_bot', $2, $3, $4, 'Generación desde bot')`,
+            [user.id, amount, user.credits, newCredits]
+        );
+        await client.query('COMMIT');
+        res.json({ success: true, newCredits });
+    } catch (error) {
+        await client.query('ROLLBACK');
+        res.status(500).json({ success: false, error: error.message });
+    } finally {
+        client.release();
+    }
+});
 
+// POST /api/user/bot/check-credits
+router.post('/bot/check-credits', async (req, res) => {
+    const { telegram_id, bot_key } = req.body;
+    if (bot_key !== process.env.BOT_API_KEY) return res.status(401).json({ success: false, error: 'No autorizado' });
+    try {
+        const result = await pool.query('SELECT credits FROM users WHERE telegram_id = $1', [telegram_id]);
+        if (result.rows.length === 0) return res.json({ success: true, credits: 0 });
+        res.json({ success: true, credits: result.rows[0].credits });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
 
 // GET /api/user/credits - Devuelve los créditos del usuario autenticado
 router.get('/credits', authenticate, async (req, res) => {
