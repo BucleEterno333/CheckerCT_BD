@@ -38,8 +38,8 @@ router.post('/bot/use-credits', async (req, res) => {
         await client.query(
             `INSERT INTO credit_transactions 
              (to_user_id, transaction_type, amount, previous_amount, new_amount, reason, created_at)
-             VALUES ($1, $2, $3, $4, $5, $6, NOW())`,
-            [userId, 'cookie_bot', amountToUse, currentCredits, newCredits, 'Generación desde bot']
+             VALUES ($1, 'credits', $2, $3, $4, $5, NOW())`,
+            [userId, amountToUse, currentCredits, newCredits, 'Generación desde bot']
         );
         await client.query('COMMIT');
         res.json({ success: true, newCredits });
