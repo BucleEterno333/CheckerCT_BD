@@ -34,11 +34,12 @@ router.post('/bot/use-credits', async (req, res) => {
         }
         const newCredits = currentCredits - amountToUse;
         await client.query('UPDATE users SET credits = $1 WHERE id = $2', [newCredits, userId]);
+        // Usar un valor más corto para transaction_type (por ejemplo, 'cookie_bot')
         await client.query(
             `INSERT INTO credit_transactions 
              (to_user_id, transaction_type, amount, previous_amount, new_amount, reason, created_at)
-             VALUES ($1, 'cookie_generation_bot', $2, $3, $4, $5, NOW())`,
-            [userId, amountToUse, currentCredits, newCredits, 'Generación desde bot']
+             VALUES ($1, $2, $3, $4, $5, $6, NOW())`,
+            [userId, 'cookie_bot', amountToUse, currentCredits, newCredits, 'Generación desde bot']
         );
         await client.query('COMMIT');
         res.json({ success: true, newCredits });
@@ -109,8 +110,8 @@ router.post('/use-credits', async (req, res) => {
         await client.query(
             `INSERT INTO credit_transactions 
              (to_user_id, transaction_type, amount, previous_amount, new_amount, reason, created_at)
-             VALUES ($1, 'cookie_generation', $2, $3, $4, $5, NOW())`,
-            [req.user.id, amountToUse, currentCredits, newCredits, 'Generación desde frontend']
+             VALUES ($1, $2, $3, $4, $5, $6, NOW())`,
+            [req.user.id, 'cookie_front', amountToUse, currentCredits, newCredits, 'Generación desde frontend']
         );
         await client.query('COMMIT');
         res.json({ success: true, newCredits });
