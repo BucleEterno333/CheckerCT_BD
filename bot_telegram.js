@@ -8,12 +8,27 @@ const { pool } = require('./database');
 
 // ========== CONFIGURACIÓN ==========
 const token = process.env.TELEGRAM_BOT_TOKEN;
-const INTERNAL_API_URL = process.env.INTERNAL_API_URL || 'http://localhost:8080/api'; // API interna
-const BOT_API_KEY = process.env.BOT_API_KEY || 'AALOL23894238HWKEJSNFSDGF';
-const API_GENCOOKIE_URL = process.env.API_GENCOOKIE_URL || 'https://p01--gencookie--2bcj5drfqjzx.code.run';
+const INTERNAL_API_URL = process.env.INTERNAL_API_URL; // API interna
+const BOT_API_KEY = process.env.BOT_API_KEY;
+const API_GENCOOKIE_URL = process.env.API_GENCOOKIE_URL;
 
 if (!token) {
     console.error('❌ ERROR: TELEGRAM_BOT_TOKEN no configurado');
+    process.exit(1);
+}
+
+if (!INTERNAL_API_URL) {
+    console.error('❌ ERROR: INTERNAL_API_URL no configurada');
+    process.exit(1);
+}   
+
+if (!BOT_API_KEY) {
+    console.error('❌ ERROR: BOT_API_KEY no configurada');
+    process.exit(1);
+}       
+
+if (!API_GENCOOKIE_URL) {
+    console.error('❌ ERROR: API_GENCOOKIE_URL no configurada');
     process.exit(1);
 }
 
