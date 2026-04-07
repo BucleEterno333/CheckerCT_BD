@@ -94,8 +94,8 @@ class User {
             // Registrar actividad
             await client.query(
                 `INSERT INTO activity_logs 
-                (user_id, action_type, target_user_id, details, created_at)
-                VALUES ($1, 'role_change', $2, $3, NOW())`,
+                (user_id, action_type, target_id, target_type, details, created_at)
+                VALUES ($1, 'role_change', $2, 'user', $3, NOW())`,
                 [changedBy, userId, JSON.stringify({
                     username: user.username,
                     from: oldRole,
@@ -180,13 +180,12 @@ class User {
             // Registrar actividad
             await client.query(
                 `INSERT INTO activity_logs 
-                 (user_id, action_type, target_user_id, details, created_at)
-                 VALUES ($1, 'add_${type}', $2, $3, NOW())`,
-                [fromUserId, toUserId, JSON.stringify({
-                    amount,
-                    previous: currentAmount,
-                    new: newAmount,
-                    reason
+                (user_id, action_type, target_id, target_type, details, created_at)
+                VALUES ($1, 'role_change', $2, 'user', $3, NOW())`,
+                [changedBy, userId, JSON.stringify({
+                    username: user.username,
+                    from: oldRole,
+                    to: newRole
                 })]
             );
             
