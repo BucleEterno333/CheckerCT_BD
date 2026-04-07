@@ -22,6 +22,80 @@ if (!token) {
 const bot = new TelegramBot(token, { polling: true });
 console.log('🤖 Bot de Telegram inicializado');
 
+
+
+
+// ========== FUNCIÓN PARA ENVIAR CÓDIGOS DE VERIFICACIÓN ==========
+async function sendVerificationCodeToUser(username, code) {
+    try {
+        // Buscar usuario en BD
+        const userResult = await pool.query(
+            `SELECT id, telegram_chat_id, telegram_username 
+             FROM users 
+             WHERE username = $1`,
+            [username.replace('@', '')] // Quitar @ si existe
+        );
+        
+        if (userResult.rows.length === 0) {
+            console.error(`❌ Usuario ${username} no encontrado`);
+            return { success: false, error: 'Usuario no encontrado' };
+        }
+        
+        const user = userResult.rows[0];
+        
+        if (!user.telegram_chat_id) {
+            console.error(`❌ Usuario ${username} no tiene chat_id (no ha dado /start)`);
+            return { 
+                success: false, 
+                error: 'Usuario no ha iniciado chat con el bot. Debe escribir /start a @C1ber7errorist4sBot' 
+            };
+        }
+        
+        // Enviar código usando chat_id
+        await bot.sendMessage(
+            user.telegram_chat_id,
+            `🔐 *Código de verificación - CiberTerroristasCHK*\n\n` +
+            `Tu código es: *${code}*\n` +
+            `⏰ Válido por 10 minutos.\n\n` +
+            `⚠️ *No compartas este código con nadie.*`,
+            { parse_mode: 'Markdown' }
+        );
+        
+        console.log(`✅ Código ${code} enviado a @${username} (Chat ID: ${user.telegram_chat_id})`);
+        
+        return { success: true };
+        
+    } catch (error) {
+        console.error('❌ Error enviando código:', error);
+        return { success: false, error: error.message };
+    }
+}
+
+// ========== FUNCIÓN PARA ENVIAR LIVE A UN CHAT ESPECÍFICO ==========
+async function sendLiveToTelegram(chatId, mensaje) {
+    try {
+        if (!chatId) {
+            return { success: false, error: 'chatId no proporcionado' };
+        }
+        
+        await bot.sendMessage(chatId, mensaje, {
+            parse_mode: 'Markdown'
+        });
+        
+        console.log(`✅ Live enviada a chat ID: ${chatId}`);
+        return { success: true };
+        
+    } catch (error) {
+        console.error('❌ Error enviando live a Telegram:', error);
+        return { 
+            success: false, 
+            error: error.message 
+        };
+    }
+}
+
+
+
 // ========== FUNCIONES AUXILIARES ==========
 
 async function getUserByTelegramId(telegramId) {
@@ -446,5 +520,7 @@ bot.on('callback_query', async (callbackQuery) => {
     await bot.sendMessage(chatId, respuesta, { parse_mode: 'Markdown' });
     await bot.answerCallbackQuery(callbackQuery.id);
 });
+
+module.exports = { bot, sendVerificationCodeToUser, sendLiveToTelegram };
 
 console.log('✅ Bot de Telegram listo');
