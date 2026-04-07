@@ -272,45 +272,6 @@ bot.onText(/\/start/, async (msg) => {
     }
 });
 
-bot.onText(/\/gencookie\s+(\w+)/i, async (msg, match) => {
-    const chatId = msg.chat.id;
-    const telegramId = msg.from.id;
-    const country = match[1].toUpperCase();
-    const paisesValidos = ['MX', 'US', 'CA', 'UK', 'DE', 'FR', 'IT', 'ES', 'JP', 'AU', 'IN'];
-    if (!paisesValidos.includes(country)) {
-        return bot.sendMessage(chatId, `❌ País inválido. Usa: ${paisesValidos.join(', ')}`);
-    }
-    try {
-        const user = await getUserByTelegramId(telegramId);
-        if (!user) return bot.sendMessage(chatId, '❌ Usa /start primero.');
-        if (user.credits < 3) return bot.sendMessage(chatId, '❌ Créditos insuficientes (3).');
-
-        await bot.sendMessage(chatId, `🔄 Generando cookie para ${country}...`);
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 300000);
-        const response = await fetch(`${API_GENCOOKIE_URL}/generate`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ country, add_address: true }),
-            signal: controller.signal
-        });
-        clearTimeout(timeoutId);
-        const data = await response.json();
-        if (data.success && data.data) {
-            const { phone, password, cookie_string, country: ctry } = data.data;
-            const newCredits = await deductCredits(telegramId, 3);
-            if (newCredits === null) throw new Error('No se pudieron descontar créditos');
-            const msgText = `🍪 *Cookie ${ctry}*\n📞 Teléfono: \`${phone}\`\n🔑 Pass: \`${password}\`\n🍪 Cookie:\n\`\`\`\n${cookie_string}\n\`\`\`\n💰 Créditos restantes: ${newCredits}`;
-            await bot.sendMessage(chatId, msgText, { parse_mode: 'Markdown' });
-        } else {
-            throw new Error(data.error || 'Error');
-        }
-    } catch (error) {
-        console.error(error);
-        bot.sendMessage(chatId, `❌ Error: ${error.message}`);
-    }
-});
-
 bot.onText(/\/gen\s+([^\s|]+\|\d{2}\|\d{2,4})(?:\s+(\d+))?/, async (msg, match) => {
     const chatId = msg.chat.id;
     let patron = match[1];
