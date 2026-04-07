@@ -53,6 +53,7 @@ class User {
     }
 
     // Cambiar rol de usuario (solo admin)
+    // models/User.js - método changeRole corregido
     static async changeRole(userId, newRole, changedBy) {
         const client = await pool.connect();
         
@@ -72,28 +73,29 @@ class User {
             const user = userResult.rows[0];
             const oldRole = user.role;
             
-            // Actualizar rol
+            // Forzar el tipo del parámetro a VARCHAR para evitar ambigüedad
+            const roleString = String(newRole);
             await client.query(
                 `UPDATE users 
-                 SET role = $1, 
-                     seller_since = CASE WHEN $1 = 'seller' AND seller_since IS NULL THEN NOW() ELSE seller_since END
-                 WHERE id = $2`,
-                [newRole, userId]
+                SET role = $1::varchar, 
+                    seller_since = CASE WHEN $1 = 'seller' AND seller_since IS NULL THEN NOW() ELSE seller_since END
+                WHERE id = $2`,
+                [roleString, userId]
             );
             
             // Registrar cambio de rol
             await client.query(
                 `INSERT INTO credit_transactions 
-                 (from_user_id, to_user_id, transaction_type, old_role, new_role, created_at)
-                 VALUES ($1, $2, 'role_change', $3, $4, NOW())`,
+                (from_user_id, to_user_id, transaction_type, old_role, new_role, created_at)
+                VALUES ($1, $2, 'role_change', $3, $4, NOW())`,
                 [changedBy, userId, oldRole, newRole]
             );
             
             // Registrar actividad
             await client.query(
                 `INSERT INTO activity_logs 
-                 (user_id, action_type, target_user_id, details, created_at)
-                 VALUES ($1, 'role_change', $2, $3, NOW())`,
+                (user_id, action_type, target_user_id, details, created_at)
+                VALUES ($1, 'role_change', $2, $3, NOW())`,
                 [changedBy, userId, JSON.stringify({
                     username: user.username,
                     from: oldRole,
