@@ -255,9 +255,9 @@ bot.onText(/\/start/, async (msg) => {
                 `✅ *Servicios activos:*\n` +
                 `• Amazon (/chk amazon + tarjetas)\n` +
                 `• Generador de cookies (/gencookie MX)\n` +
-                `• Extrapolador (/extrapolador 123456)\n` +
-                `• Generador de tarjetas (/gen patrón)\n` +
-                `• Limpiador de texto (/limpiador)\n`;
+                `• Extrapolador (/extrapolador 554625)\n` +
+                `• Generador de tarjetas (/gen 491566302743xxxx|12|2027)\n` +
+                `• Limpiador de texto (/limpiador + tarjetas con info extra)\n`;
             const mensaje = 
                 `👋 ¡Hola ${firstName}!\n\n` +
                 `💰 *Créditos:* ${existing.credits}\n` +
@@ -287,7 +287,7 @@ bot.onText(/\/gencookie\s+(\w+)/i, async (msg, match) => {
 
         await bot.sendMessage(chatId, `🔄 Generando cookie para ${country}...`);
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 240000);
+        const timeoutId = setTimeout(() => controller.abort(), 300000);
         const response = await fetch(`${API_GENCOOKIE_URL}/generate`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -369,7 +369,7 @@ bot.onText(/\/extrapolador\s+(\d{6})/, async (msg, match) => {
 
     try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 30000);
+        const timeoutId = setTimeout(() => controller.abort(), 180000);
         const response = await fetch(`${API_EXTRAPOLADOR_URL}/api/search-bin`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
