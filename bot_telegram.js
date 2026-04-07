@@ -149,6 +149,87 @@ function filtrarTarjetasDeTexto(textoSucio) {
 }
 
 // ========== COMANDOS ==========
+// /start – Identifica al usuario por su ID numérico de Telegram
+bot.onText(/\/start/, async (msg) => {
+    const chatId = msg.chat.id;
+    const from = msg.from;
+    const userId = from.id;                 // ID numérico único
+    const username = from.username || userId.toString();
+    const firstName = from.first_name || '';
+
+    try {
+        // Verificar si el usuario ya existe por telegram_id
+        const existing = await pool.query(
+            'SELECT id, credits, days_remaining FROM users WHERE telegram_id = $1',
+            [userId]
+        );
+        const isNew = existing.rows.length === 0;
+
+        // Guardar o actualizar datos del usuario (siempre)
+        // telegram_chat_id solo si es chat privado
+        let query, params;
+        if (msg.chat.type === 'private') {
+            query = `
+                INSERT INTO users (telegram_id, telegram_username, telegram_chat_id, username, created_at)
+                VALUES ($1, $2, $3, $4, NOW())
+                ON CONFLICT (telegram_id) DO UPDATE 
+                SET telegram_chat_id = $3, telegram_username = $2, username = $4, updated_at = NOW()
+            `;
+            params = [userId, username, chatId, username];
+        } else {
+            // En grupos, no guardamos chat_id (para no mezclar)
+            query = `
+                INSERT INTO users (telegram_id, telegram_username, username, created_at)
+                VALUES ($1, $2, $3, NOW())
+                ON CONFLICT (telegram_id) DO UPDATE 
+                SET telegram_username = $2, username = $3, updated_at = NOW()
+            `;
+            params = [userId, username, username];
+        }
+        await pool.query(query, params);
+
+        if (isNew) {
+            // Mensaje de bienvenida (primera vez)
+            const welcome = 
+                `👋 ¡Hola ${firstName}! 👋 \n\n` +
+                `He guardado tu Chat ID: <code>${chatId}</code>\n\n` +
+                `Ahora puedes registrarte en la web siguiendo estos pasos:\n\n` +
+                `1. Ve a la página:\n\n` +
+                `                 ꧁⎝ 𓆩༺✧༻𓆪 ⎠꧂\n` +
+                `https://ciber7erroristaschk.com/login.html\n` +
+                `                 ꧁⎝ 𓆩༺✧༻𓆪 ⎠꧂ \n\n` +
+                `2. Usa tu usuario: @${username}\n\n` +
+                `3. Recibirás un código de verificación aquí. \n\n` +
+                `4. Escríbelo en la página web, y comienza a livear y shippear ahora. \n\n` +
+                `                 👾 ¡Te esperamos! 👾`;
+            await bot.sendMessage(chatId, welcome, { parse_mode: 'HTML' });
+        } else {
+            // Usuario ya existe: mostrar sus créditos reales
+            const user = existing.rows[0];
+                        const servicios = 
+                `✅ *Servicios activos:*\n` +
+                `*Gates:*\n` +
+                `• Amazon (/setCookie + cookie, y /chk amazon + tarjetas) ✅\n` +
+                `*Herramientas:*\n` +
+                `• Generador de cookies (/gencookie + país) ✅\n` +
+                `• Extrapolador (/extrapolador + BIN) ✅\n` +
+                `• Generador de tarjetas (/gen + patrón) ✅\n` +
+                `• Limpiador de texto (/limpiador) ✅\n`;
+
+            const mensaje = 
+                `👋 ¡Hola ${firstName}!\n\n` +
+                `Tu cuenta de Telegram ya está vinculada.\n` +
+                `💰 *Créditos:* ${credits}\n` +
+                `📅 *Días restantes:* ${days}\n\n` +
+                `${servicios}\n\n` +
+                `Usa /menu para ver todos los comandos.`;
+            await bot.sendMessage(chatId, mensaje, { parse_mode: 'Markdown' });
+        }
+    } catch (error) {
+        console.error('Error en /start:', error);
+        await bot.sendMessage(chatId, '❌ Error interno. Intenta más tarde.');
+    }
+});
 
 // /start – Manejo en privado y en grupos
 bot.onText(/\/start/, async (msg) => {
@@ -358,16 +439,23 @@ bot.onText(/\/chk\s+amazon/i, async (msg) => {
     );
 });
 
-// /creditos – Ver créditos y días restantes
-bot.onText(/\/creditos|\/credits|\/saldo|\/dias/, async (msg) => {
+bot.onText(/\/creditos/, async (msg) => {
+    const userId = msg.from.id;
     const chatId = msg.chat.id;
-    const user = await getUserByChatId(chatId);
-    if (!user) return bot.sendMessage(chatId, '❌ Usuario no registrado. Usa /start primero.');
-    await bot.sendMessage(chatId,
-        `💳 *Tus créditos:* ${user.credits}\n📅 *Días restantes:* ${user.days_remaining}\n\n` +
-        `Para recargar, usa /renovar y contacta con soporte.`,
-        { parse_mode: 'Markdown' }
-    );
+    try {
+        const result = await pool.query(
+            'SELECT credits, days_remaining FROM users WHERE telegram_id = $1',
+            [userId]
+        );
+        if (result.rows.length === 0) {
+            return bot.sendMessage(chatId, '❌ No estás registrado. Usa /start primero.');
+        }
+        const { credits, days_remaining } = result.rows[0];
+        await bot.sendMessage(chatId, `💰 Créditos: ${credits}\n📅 Días restantes: ${days_remaining}`);
+    } catch (error) {
+        console.error(error);
+        bot.sendMessage(chatId, '❌ Error al consultar créditos.');
+    }
 });
 
 // /renovar – Contactar con soporte (redirige a un contacto)
