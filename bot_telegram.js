@@ -151,12 +151,22 @@ function filtrarTarjetasDeTexto(textoSucio) {
 // ========== COMANDOS ==========
 
 // /start – Vincular cuenta y mostrar estado de servicios
+// /start – Primera vez: mensaje de registro; siguientes: estado de cuenta
 bot.onText(/\/start/, async (msg) => {
     const chatId = msg.chat.id;
     const username = msg.from.username;
     const firstName = msg.from.first_name || '';
+
     try {
-        // Vincular o actualizar chat_id
+        // Verificar si el usuario ya existe en la base de datos
+        const existingUser = await pool.query(
+            'SELECT id, credits, days_remaining FROM users WHERE username = $1',
+            [username]
+        );
+
+        const isNewUser = existingUser.rows.length === 0;
+
+        // Insertar o actualizar chat_id (siempre necesario)
         await pool.query(
             `INSERT INTO users (username, telegram_username, telegram_chat_id, created_at)
              VALUES ($1, $2, $3, NOW())
@@ -164,26 +174,52 @@ bot.onText(/\/start/, async (msg) => {
              SET telegram_chat_id = $3, updated_at = NOW()`,
             [username, `@${username}`, chatId]
         );
-        // Obtener créditos y días del usuario (si existe)
-        const user = await getUserByChatId(chatId);
-        const credits = user ? user.credits : 'N/A';
-        const days = user ? user.days_remaining : 'N/A';
-        // Servicios activos
-        const servicios = `✅ *Servicios activos:*\n` +
-                         `• Gates: Amazon\n` +
-                         `• Herramientas: Extrapolador, Generador de Cookie, Bot de Telegram\n` +
-                         `• Generador de tarjetas (/gen)\n` +
-                         `• Limpiador de texto (/limpiador)`;
-        const mensaje = `👋 ¡Hola ${firstName}!\n\n` +
-                        `Tu cuenta de Telegram ha sido vinculada.\n` +
-                        `💰 *Créditos:* ${credits}\n` +
-                        `📅 *Días restantes:* ${days}\n\n` +
-                        `${servicios}\n\n` +
-                        `Usa /menu para ver todos los comandos.`;
-        await bot.sendMessage(chatId, mensaje, { parse_mode: 'Markdown' });
+
+        if (isNewUser) {
+            // MENSAJE PARA PRIMERA VEZ
+            const mensajeBienvenida = 
+                `👋 ¡Hola ${firstName}! 👋 \n\n` +
+                `He guardado tu Chat ID: <code>${chatId}</code>\n\n` +
+                `Ahora puedes registrarte en la web siguiendo estos pasos:\n\n` +
+                `1. Ve a la página:\n\n` +
+                `                 ꧁⎝ 𓆩༺✧༻𓆪 ⎠꧂\n` +
+                `https://ciber7erroristaschk.com/login.html\n` +
+                `                 ꧁⎝ 𓆩༺✧༻𓆪 ⎠꧂ \n\n` +
+                `2. Usa tu usuario: @${username}\n\n` +
+                `3. Recibirás un código de verificación aquí. \n\n` +
+                `4. Escríbelo en la página web, y comienza a livear y shippear ahora. \n\n` +
+                `                 👾 ¡Te esperamos! 👾`;
+
+            await bot.sendMessage(chatId, mensajeBienvenida, { parse_mode: 'HTML' });
+        } else {
+            // USUARIO YA EXISTE: mostrar créditos, días y servicios activos
+            const user = existingUser.rows[0];
+            const credits = user.credits;
+            const days = user.days_remaining;
+
+            const servicios = 
+                `✅ *Servicios activos:*\n` +
+                `*Gates:*\n` +
+                `• Amazon (/setCookie + cookie, y /chk amazon + tarjetas) ✅\n` +
+                `*Herramientas:*\n` +
+                `• Generador de cookies (/gencookie + país) ✅\n` +
+                `• Extrapolador (/extrapolador + BIN) ✅\n` +
+                `• Generador de tarjetas (/gen + patrón) ✅\n` +
+                `• Limpiador de texto (/limpiador) ✅\n`;
+
+            const mensaje = 
+                `👋 ¡Hola ${firstName}!\n\n` +
+                `Tu cuenta de Telegram ya está vinculada.\n` +
+                `💰 *Créditos:* ${credits}\n` +
+                `📅 *Días restantes:* ${days}\n\n` +
+                `${servicios}\n\n` +
+                `Usa /menu para ver todos los comandos.`;
+
+            await bot.sendMessage(chatId, mensaje, { parse_mode: 'Markdown' });
+        }
     } catch (error) {
-        console.error(error);
-        bot.sendMessage(chatId, '❌ Error al vincular cuenta.');
+        console.error('Error en /start:', error);
+        bot.sendMessage(chatId, '❌ Hubo un error al procesar tu solicitud. Intenta más tarde.');
     }
 });
 
