@@ -361,114 +361,74 @@ bot.onText(/\/limpiador/, async (msg) => {
 });
 
 // /extrapolador <bin> – Busca tarjetas por BIN y muestra patrones agrupados
-bot.onText(/\/extrapolador\s+(\d{6})/, async (msg, match) => {
+bot.onText(/\/gencookie\s+(\w+)/i, async (msg, match) => {
     const chatId = msg.chat.id;
-    const bin = match[1];
-    const API_EXTRAPOLADOR_URL = process.env.API_EXTRAPOLADOR_URL || 'https://p01--extrapolador--2bcj5drfqjzx.code.run';
-
-    await bot.sendMessage(chatId, `🔍 Extrapolando para BIN ${bin}...`);
+    const telegramId = msg.from.id;
+    const country = match[1].toUpperCase();
+    const paisesValidos = ['MX', 'US', 'CA', 'UK', 'DE', 'FR', 'IT', 'ES', 'JP', 'AU', 'IN'];
+    if (!paisesValidos.includes(country)) {
+        return bot.sendMessage(chatId, `❌ País inválido. Usa: ${paisesValidos.join(', ')}`);
+    }
 
     try {
+        // 1. Verificar créditos antes de generar
+        const user = await getUserByTelegramId(telegramId);
+        if (!user) return bot.sendMessage(chatId, '❌ Usa /start primero.');
+        if (user.credits < 3) return bot.sendMessage(chatId, '❌ Créditos insuficientes (necesitas 3).');
+
+        await bot.sendMessage(chatId, `🔄 Generando cookie para ${country}... (puede tomar hasta 2 minutos)`);
+
+        // 2. Generar cookie
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 180000);
-        const response = await fetch(`${API_EXTRAPOLADOR_URL}/api/search-bin`, {
+        const timeoutId = setTimeout(() => controller.abort(), 150000);
+        const response = await fetch(`${API_GENCOOKIE_URL}/generate`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ bin }),
+            body: JSON.stringify({ country, add_address: true }),
             signal: controller.signal
         });
         clearTimeout(timeoutId);
 
+        const textResponse = await response.text();
         if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
+            throw new Error(`HTTP ${response.status}: ${textResponse.substring(0, 100)}`);
         }
 
-        const data = await response.json();
-        if (!data.success || !data.data || data.data.length === 0) {
-            return bot.sendMessage(chatId, `❌ No se encontraron tarjetas para el BIN ${bin}.`);
+        let data;
+        try {
+            data = JSON.parse(textResponse);
+        } catch (e) {
+            throw new Error(`Respuesta no es JSON válido: ${textResponse.substring(0, 100)}`);
         }
 
-        // Procesar las tarjetas para extraer patrones (primeros 12 dígitos + "xxxx" | mes | año)
-        const tarjetas = data.data; // array de strings "numero|mes|año|cvv"
-        const patrones = {};
-
-        for (const tarjeta of tarjetas) {
-            const partes = tarjeta.split('|');
-            if (partes.length < 3) continue;
-            const numero = partes[0];
-            const mes = partes[1];
-            const año = partes[2];
-            if (numero.length !== 16) continue;
-            const prefix = numero.slice(0, 12); // primeros 12 dígitos
-            const clave = `${prefix}xxxx|${mes}|${año}`;
-            patrones[clave] = (patrones[clave] || 0) + 1;
+        if (!data.success || !data.data) {
+            throw new Error(data.error || 'Error desconocido del generador');
         }
 
-        if (Object.keys(patrones).length === 0) {
-            return bot.sendMessage(chatId, `❌ No se pudieron extraer patrones válidos.`);
+        const { phone, password, cookie_string, country: ctry } = data.data;
+
+        // 3. Intentar descontar créditos (pero no impedir mostrar la cookie)
+        let newCredits = null;
+        try {
+            newCredits = await deductCredits(telegramId, 3);
+            if (newCredits === null) throw new Error('Fallo en el descuento de créditos');
+        } catch (creditError) {
+            console.error('Error al descontar créditos (pero la cookie se generó):', creditError);
+            // No lanzamos excepción, solo registramos
         }
 
-        // Clasificar patrones
-        const muyRepetidos = [];
-        const moderados = [];
-        const unicos = [];
-
-        for (const [patron, count] of Object.entries(patrones)) {
-            if (count >= 3) muyRepetidos.push({ patron, count });
-            else if (count === 2) moderados.push({ patron, count });
-            else unicos.push({ patron, count });
+        // 4. Mostrar la cookie siempre
+        let msgText = `🍪 *Cookie ${ctry} generada*\n\n📞 Teléfono: \`${phone}\`\n🔑 Contraseña: \`${password}\`\n🍪 Cookie:\n\`\`\`\n${cookie_string}\n\`\`\``;
+        if (newCredits !== null) {
+            msgText += `\n💰 Créditos restantes: ${newCredits}`;
+        } else {
+            msgText += `\n⚠️ No se pudieron actualizar tus créditos (contacta con soporte), pero la cookie es válida.`;
         }
-
-        // Ordenar por frecuencia descendente
-        muyRepetidos.sort((a, b) => b.count - a.count);
-        moderados.sort((a, b) => b.count - a.count);
-        unicos.sort((a, b) => b.count - a.count);
-
-        // Construir mensaje
-        let mensaje = `=== EXTRAPOLADOR - RESULTADOS ===\n\n`;
-
-        if (muyRepetidos.length > 0) {
-            mensaje += `🟢 PATRONES MUY REPETIDOS (${muyRepetidos.length}):\n`;
-            mensaje += `==================================================\n`;
-            for (const p of muyRepetidos.slice(0, 15)) {
-                const [prefix, mes, año] = p.patron.split('|');
-                mensaje += `${prefix} | ${mes}/${año} | (${p.count} veces)\n`;
-            }
-            if (muyRepetidos.length > 15) mensaje += `... y ${muyRepetidos.length - 15} más.\n`;
-            mensaje += `\n`;
-        }
-
-        if (moderados.length > 0) {
-            mensaje += `🟡 PATRONES MODERADOS (${moderados.length}):\n`;
-            mensaje += `==================================================\n`;
-            for (const p of moderados.slice(0, 15)) {
-                const [prefix, mes, año] = p.patron.split('|');
-                mensaje += `${prefix} | ${mes}/${año} | (${p.count} veces)\n`;
-            }
-            if (moderados.length > 15) mensaje += `... y ${moderados.length - 15} más.\n`;
-            mensaje += `\n`;
-        }
-
-        if (unicos.length > 0) {
-            mensaje += `🔴 PATRONES ÚNICOS (${unicos.length}):\n`;
-            mensaje += `==================================================\n`;
-            for (const p of unicos.slice(0, 20)) {
-                const [prefix, mes, año] = p.patron.split('|');
-                mensaje += `${prefix} | ${mes}/${año} | (${p.count} vez)\n`;
-            }
-            if (unicos.length > 20) mensaje += `... y ${unicos.length - 20} más.\n`;
-        }
-
-        // Telegram tiene límite de 4096 caracteres por mensaje
-        if (mensaje.length > 4090) {
-            mensaje = mensaje.substring(0, 4000) + "\n... (mensaje truncado)";
-        }
-
-        await bot.sendMessage(chatId, mensaje, { parse_mode: 'Markdown' });
+        await bot.sendMessage(chatId, msgText, { parse_mode: 'Markdown' });
 
     } catch (error) {
-        console.error('Error en /extrapolador:', error);
-        await bot.sendMessage(chatId, `❌ Error al consultar el extrapolador: ${error.message}`);
+        console.error('Error en /gencookie:', error);
+        bot.sendMessage(chatId, `❌ Error generando cookie: ${error.message}`);
     }
 });
 
