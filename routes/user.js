@@ -10,6 +10,23 @@ const { pool } = require('../database');
 router.use(authenticate);
 
 
+
+// GET /api/user/credits - Devuelve los créditos del usuario autenticado
+router.get('/credits', authenticate, async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const result = await pool.query('SELECT credits FROM users WHERE id = $1', [userId]);
+        if (result.rows.length === 0) {
+            return res.status(404).json({ success: false, error: 'Usuario no encontrado' });
+        }
+        res.json({ success: true, credits: result.rows[0].credits });
+    } catch (error) {
+        console.error('Error obteniendo créditos:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+
 // routes/user.js (agrega este endpoint)
 router.post('/use-credits', authenticate, async (req, res) => {
     try {
