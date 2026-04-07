@@ -8,9 +8,11 @@ const { pool } = require('./database');
 
 // ========== CONFIGURACIÓN ==========
 const token = process.env.TELEGRAM_BOT_TOKEN;
-const INTERNAL_API_URL = process.env.INTERNAL_API_URL || 'http://basedatos:8080/api';
-const BOT_API_KEY = process.env.BOT_API_KEY || 'AALOL23894238HWKEJSNFSDGF';
-const API_GENCOOKIE_URL = process.env.API_GENCOOKIE_URL || 'https://p01--gencookie--2bcj5drfqjzx.code.run';
+const INTERNAL_API_URL = process.env.INTERNAL_API_URL;
+const BOT_API_KEY = process.env.BOT_API_KEY;
+const API_GENCOOKIE_URL = process.env.API_GENCOOKIE_URL;
+const API_EXTRAPOLADOR_URL = process.env.API_EXTRAPOLADOR_URL;
+
 
 if (!token) {
     console.error('❌ ERROR: TELEGRAM_BOT_TOKEN no configurado');
@@ -211,7 +213,7 @@ bot.onText(/\/gencookie\s+(\w+)/i, async (msg, match) => {
 
         await bot.sendMessage(chatId, `🔄 Generando cookie para ${country}...`);
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 120000);
+        const timeoutId = setTimeout(() => controller.abort(), 240000);
         const response = await fetch(`${API_GENCOOKIE_URL}/generate`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -284,10 +286,41 @@ bot.onText(/\/limpiador/, async (msg) => {
     bot.on('message', listener);
 });
 
+// /extrapolador <bin> – Busca tarjetas por BIN usando el servicio de extrapolación
 bot.onText(/\/extrapolador\s+(\d{6})/, async (msg, match) => {
     const chatId = msg.chat.id;
     const bin = match[1];
-    await bot.sendMessage(chatId, `🔍 Búsqueda para BIN ${bin} (próximamente).`);
+
+    await bot.sendMessage(chatId, `🔍 Buscando tarjetas para el BIN ${bin}...`);
+
+    try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 30000);
+        const response = await fetch(`${API_EXTRAPOLADOR_URL}/api/search-bin`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ bin }),
+            signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+        if (data.success && data.data && data.data.length > 0) {
+            const tarjetas = data.data.slice(0, 20); // máximo 20 resultados
+            const lista = tarjetas.map((t, i) => `${i+1}. \`${t}\``).join('\n');
+            const resto = data.data.length > 20 ? `\n... y ${data.data.length - 20} más.` : '';
+            await bot.sendMessage(chatId, `📊 *Tarjetas encontradas para BIN ${bin} (${data.data.length}):*\n\n${lista}${resto}`, { parse_mode: 'Markdown' });
+        } else {
+            await bot.sendMessage(chatId, `❌ No se encontraron tarjetas para el BIN ${bin}.`);
+        }
+    } catch (error) {
+        console.error('Error en /extrapolador:', error);
+        await bot.sendMessage(chatId, `❌ Error al consultar el extrapolador: ${error.message}`);
+    }
 });
 
 bot.onText(/\/chk\s+amazon(?:\s+(.+))?/i, async (msg, match) => {
