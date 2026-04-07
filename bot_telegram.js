@@ -186,7 +186,7 @@ bot.onText(/\/gencookie\s+(\w+)/i, async (msg, match) => {
     await bot.sendMessage(chatId, `🔄 Generando cookie para ${country}... (hasta 2 min)`);
     try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 150000);
+        const timeoutId = setTimeout(() => controller.abort(), 500000);
         const response = await fetch(`${API_GENCOOKIE_URL}/generate`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
