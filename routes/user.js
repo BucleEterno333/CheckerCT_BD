@@ -15,7 +15,7 @@ router.post('/use-credits', authenticate, async (req, res) => {
     try {
         const { amount } = req.body;
         const userId = req.user.id;
-        const amountToUse = parseInt(amount) || 3; // por defecto 3
+        const amountToUse = parseInt(amount) || 3;
 
         // Verificar créditos disponibles
         const userResult = await pool.query(
@@ -36,10 +36,10 @@ router.post('/use-credits', authenticate, async (req, res) => {
             [amountToUse, userId]
         );
 
-        // Registrar transacción (opcional)
+        // Registrar transacción - USAR to_user_id porque el usuario es el que gasta créditos
         await pool.query(
             `INSERT INTO credit_transactions 
-             (user_id, transaction_type, amount, previous_amount, new_amount, reason, created_at)
+             (to_user_id, transaction_type, amount, previous_amount, new_amount, reason, created_at)
              VALUES ($1, 'cookie_generation', $2, $3, $4, $5, NOW())`,
             [userId, amountToUse, currentCredits, currentCredits - amountToUse, 'Generación de cookie Amazon']
         );
