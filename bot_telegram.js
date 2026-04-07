@@ -9,6 +9,7 @@ const { pool } = require('./database');
 // ========== CONFIGURACIÓN ==========
 const token = process.env.TELEGRAM_BOT_TOKEN;
 const API_BASE_URL = process.env.API_BASE_URL || 'https://p01--basedatos--vwr6mdxp7dhn.code.run/api';
+const BOT_API_KEY = process.env.BOT_API_KEY || 'AALOL23894238HWKEJSNFSDGF'; // Clave secreta para que el bot pueda usar el endpoint de descuento de créditos
 const API_GENCOOKIE_URL = process.env.API_GENCOOKIE_URL || 'https://p01--gencookie--2bcj5drfqjzx.code.run';
 const API_EXTRAPOLADOR_URL = process.env.API_EXTRAPOLADOR_URL || 'https://p01--extrapolador--2bcj5drfqjzx.code.run';
 
@@ -26,9 +27,28 @@ async function getUserByChatId(chatId) {
     return res.rows[0];
 }
 
-async function deductCredits(username, amount) {
-    const res = await pool.query('UPDATE users SET credits = credits - $1 WHERE username = $2 RETURNING credits', [amount, username]);
-    return res.rows[0]?.credits;
+async function deductCredits(username, amount = 3) {
+    try {
+        const response = await fetch(`${API_BASE_URL}/user/bot/use-credits`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                username: username,
+                amount: amount,
+                bot_key: BOT_API_KEY
+            })
+        });
+        const data = await response.json();
+        if (data.success) {
+            return data.newCredits;
+        } else {
+            console.error('Error al descontar créditos (bot):', data.error);
+            return null;
+        }
+    } catch (error) {
+        console.error('Error en petición de descuento de créditos:', error);
+        return null;
+    }
 }
 
 // Función para generar tarjetas a partir de un patrón (ej: 549949056298xxxx|05|2029)

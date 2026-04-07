@@ -4,8 +4,53 @@ const router = express.Router();
 const { authenticate } = require('../middleware/auth');
 const User = require('../models/User');
 
+const { pool } = require('../database');
+
 // Todas las rutas requieren autenticación
 router.use(authenticate);
+
+
+// routes/user.js (agrega este endpoint)
+router.post('/use-credits', authenticate, async (req, res) => {
+    try {
+        const { amount } = req.body;
+        const userId = req.user.id;
+        const amountToUse = parseInt(amount) || 3; // por defecto 3
+
+        // Verificar créditos disponibles
+        const userResult = await pool.query(
+            'SELECT credits FROM users WHERE id = $1 FOR UPDATE',
+            [userId]
+        );
+        if (userResult.rows.length === 0) {
+            return res.status(404).json({ success: false, error: 'Usuario no encontrado' });
+        }
+        const currentCredits = userResult.rows[0].credits;
+        if (currentCredits < amountToUse) {
+            return res.status(400).json({ success: false, error: 'Créditos insuficientes' });
+        }
+
+        // Restar créditos
+        await pool.query(
+            'UPDATE users SET credits = credits - $1 WHERE id = $2',
+            [amountToUse, userId]
+        );
+
+        // Registrar transacción (opcional)
+        await pool.query(
+            `INSERT INTO credit_transactions 
+             (user_id, transaction_type, amount, previous_amount, new_amount, reason, created_at)
+             VALUES ($1, 'cookie_generation', $2, $3, $4, $5, NOW())`,
+            [userId, amountToUse, currentCredits, currentCredits - amountToUse, 'Generación de cookie Amazon']
+        );
+
+        res.json({ success: true, newCredits: currentCredits - amountToUse });
+    } catch (error) {
+        console.error('Error al descontar créditos:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
 
 // Obtener perfil del usuario actual
 router.get('/profile', async (req, res) => {
@@ -39,6 +84,52 @@ router.get('/cookie-count', async (req, res) => {
         res.json({ success: true, count });
     } catch (error) {
         console.error('Error obteniendo contador:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// routes/user.js - Agrega esto al final del archivo, antes de module.exports
+
+const BOT_API_KEY = process.env.BOT_API_KEY || 'cambia_esta_clave_secreta';
+
+// Endpoint para que el bot descuente créditos (usa API key en lugar de token)
+router.post('/bot/use-credits', async (req, res) => {
+    try {
+        const { username, amount, bot_key } = req.body;
+        if (bot_key !== BOT_API_KEY) {
+            return res.status(401).json({ success: false, error: 'No autorizado' });
+        }
+        const amountToUse = parseInt(amount) || 3;
+
+        const userResult = await pool.query(
+            'SELECT id, credits FROM users WHERE username = $1 FOR UPDATE',
+            [username]
+        );
+        if (userResult.rows.length === 0) {
+            return res.status(404).json({ success: false, error: 'Usuario no encontrado' });
+        }
+        const userId = userResult.rows[0].id;
+        const currentCredits = userResult.rows[0].credits;
+        if (currentCredits < amountToUse) {
+            return res.status(400).json({ success: false, error: 'Créditos insuficientes' });
+        }
+
+        await pool.query(
+            'UPDATE users SET credits = credits - $1 WHERE id = $2',
+            [amountToUse, userId]
+        );
+
+        // Registrar transacción (opcional pero recomendado)
+        await pool.query(
+            `INSERT INTO credit_transactions 
+             (user_id, transaction_type, amount, previous_amount, new_amount, reason, created_at)
+             VALUES ($1, 'cookie_generation_bot', $2, $3, $4, $5, NOW())`,
+            [userId, amountToUse, currentCredits, currentCredits - amountToUse, 'Generación de cookie desde bot']
+        );
+
+        res.json({ success: true, newCredits: currentCredits - amountToUse });
+    } catch (error) {
+        console.error('Error al descontar créditos (bot):', error);
         res.status(500).json({ success: false, error: error.message });
     }
 });
