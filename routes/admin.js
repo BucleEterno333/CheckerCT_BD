@@ -1,16 +1,83 @@
-// routes/admin.js
 const express = require('express');
 const router = express.Router();
 const { authenticate, requireRole, trackActivity } = require('../middleware/auth');
 const User = require('../models/User');
 const { pool } = require('../database');
 
-
-
 // Todas las rutas requieren autenticación
 router.use(authenticate);
 
-// Obtener un usuario por ID (admin only)
+// ========== LISTAR USUARIOS CON PAGINACIÓN CORRECTA ==========
+router.get('/users', requireRole('admin', 'seller'), async (req, res) => {
+    try {
+        const { role, page = 1, limit = 20, search = '' } = req.query;
+        const offset = (parseInt(page) - 1) * parseInt(limit);
+        
+        let query = `
+            SELECT id, username, display_name, credits, days_remaining, 
+                   role, total_checks, total_lives, created_at, last_login, is_active
+            FROM users WHERE 1=1
+        `;
+        const params = [];
+        let paramIndex = 1;
+        
+        // Filtro por rol (si se especifica y el usuario es admin puede filtrar cualquier rol, si es seller solo ve 'user')
+        if (req.user.role === 'admin' && role) {
+            query += ` AND role = $${paramIndex}`;
+            params.push(role);
+            paramIndex++;
+        } else if (req.user.role === 'seller') {
+            query += ` AND role = 'user'`;
+        }
+        
+        // Búsqueda por username
+        if (search) {
+            query += ` AND username ILIKE $${paramIndex}`;
+            params.push(`%${search}%`);
+            paramIndex++;
+        }
+        
+        query += ` ORDER BY created_at DESC LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
+        params.push(parseInt(limit), offset);
+        
+        const result = await pool.query(query, params);
+        
+        // Obtener total de usuarios (sin paginación)
+        let countQuery = `SELECT COUNT(*) as total FROM users WHERE 1=1`;
+        const countParams = [];
+        let countIndex = 1;
+        if (req.user.role === 'admin' && role) {
+            countQuery += ` AND role = $${countIndex}`;
+            countParams.push(role);
+            countIndex++;
+        } else if (req.user.role === 'seller') {
+            countQuery += ` AND role = 'user'`;
+        }
+        if (search) {
+            countQuery += ` AND username ILIKE $${countIndex}`;
+            countParams.push(`%${search}%`);
+        }
+        const totalResult = await pool.query(countQuery, countParams);
+        const total = parseInt(totalResult.rows[0].total);
+        
+        res.json({ 
+            success: true,
+            users: result.rows,
+            pagination: {
+                page: parseInt(page),
+                limit: parseInt(limit),
+                total: total,
+                totalPages: Math.ceil(total / parseInt(limit))
+            }
+        });
+        
+    } catch (error) {
+        console.error('Error listando usuarios:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// ========== OBTENER UN USUARIO POR ID ==========
 router.get('/users/:userId', requireRole('admin'), async (req, res) => {
     try {
         const { userId } = req.params;
@@ -29,7 +96,8 @@ router.get('/users/:userId', requireRole('admin'), async (req, res) => {
         res.status(500).json({ success: false, error: error.message });
     }
 });
-// ACTUALIZAR CRÉDITOS
+
+// ========== ACTUALIZAR CRÉDITOS ==========
 router.put('/users/:userId/credits', requireRole('admin'), trackActivity, async (req, res) => {
     const client = await pool.connect();
     try {
@@ -37,7 +105,6 @@ router.put('/users/:userId/credits', requireRole('admin'), trackActivity, async 
         const { userId } = req.params;
         let { credits, reason = '' } = req.body;
 
-        // Convertir a número entero
         const newCredits = parseInt(credits, 10);
         if (isNaN(newCredits) || newCredits < 0) {
             return res.status(400).json({ success: false, error: 'Créditos inválidos' });
@@ -46,7 +113,6 @@ router.put('/users/:userId/credits', requireRole('admin'), trackActivity, async 
         const userIdInt = parseInt(userId, 10);
         const adminId = req.user.id;
 
-        // Obtener usuario actual
         const userResult = await client.query(
             'SELECT id, username, credits FROM users WHERE id = $1 FOR UPDATE',
             [userIdInt]
@@ -56,10 +122,9 @@ router.put('/users/:userId/credits', requireRole('admin'), trackActivity, async 
         }
 
         const user = userResult.rows[0];
-        const oldCredits = user.credits;
+        const oldCredits = parseInt(user.credits, 10);
         const amount = newCredits - oldCredits;
 
-        // Actualizar créditos
         await client.query(
             'UPDATE users SET credits = $1, updated_at = NOW() WHERE id = $2',
             [newCredits, userIdInt]
@@ -85,7 +150,7 @@ router.put('/users/:userId/credits', requireRole('admin'), trackActivity, async 
     }
 });
 
-// ACTUALIZAR DÍAS
+// ========== ACTUALIZAR DÍAS ==========
 router.put('/users/:userId/days', requireRole('admin'), trackActivity, async (req, res) => {
     const client = await pool.connect();
     try {
@@ -110,7 +175,7 @@ router.put('/users/:userId/days', requireRole('admin'), trackActivity, async (re
         }
 
         const user = userResult.rows[0];
-        const oldDays = user.days_remaining;
+        const oldDays = parseInt(user.days_remaining, 10);
         const amount = newDays - oldDays;
 
         await client.query(
@@ -138,34 +203,14 @@ router.put('/users/:userId/days', requireRole('admin'), trackActivity, async (re
     }
 });
 
-// ========== OBTENER DETALLE DE UN USUARIO ==========
-router.get('/users/:userId', requireRole('admin'), async (req, res) => {
-    try {
-        const { userId } = req.params;
-        const user = await User.findById(userId);
-        if (!user) {
-            return res.status(404).json({ success: false, error: 'Usuario no encontrado' });
-        }
-        res.json({ success: true, user });
-    } catch (error) {
-        console.error('Error obteniendo usuario:', error);
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
-
-// ========== RUTAS DE ADMINISTRADOR ==========
-
-// Cambiar rol de usuario (solo admin)
+// ========== CAMBIAR ROL ==========
 router.put('/users/:userId/role', requireRole('admin'), trackActivity, async (req, res) => {
     try {
         const { userId } = req.params;
         const { new_role } = req.body;
         
         if (!['user', 'seller', 'admin'].includes(new_role)) {
-            return res.status(400).json({ 
-                success: false, 
-                error: 'Rol inválido' 
-            });
+            return res.status(400).json({ success: false, error: 'Rol inválido' });
         }
         
         const result = await User.changeRole(userId, new_role, req.user.id);
@@ -182,65 +227,33 @@ router.put('/users/:userId/role', requireRole('admin'), trackActivity, async (re
     }
 });
 
-// Listar todos los usuarios (admin puede ver todos)
-router.get('/users', requireRole('admin', 'seller'), async (req, res) => {
+// ========== CAMBIAR ESTADO (ACTIVAR/DESACTIVAR) ==========
+router.put('/users/:userId/status', requireRole('admin'), async (req, res) => {
     try {
-        const { role, page = 1, limit = 50 } = req.query;
+        const { userId } = req.params;
+        const { is_active } = req.body;
         
-        // Sellers solo ven usuarios normales, admin ve todos
-        const allowedRoles = req.user.role === 'admin' ? role : 'user';
+        if (typeof is_active !== 'boolean') {
+            return res.status(400).json({ success: false, error: 'is_active debe ser true o false' });
+        }
         
-        const users = await User.listUsers(allowedRoles, parseInt(page), parseInt(limit));
-        
-        res.json({ 
-            success: true,
-            users,
-            pagination: {
-                page: parseInt(page),
-                limit: parseInt(limit)
-            }
-        });
-        
-    } catch (error) {
-        console.error('Error listando usuarios:', error);
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
-
-// Obtener transacciones de sellers (admin only)
-router.get('/transactions/sellers', requireRole('admin'), async (req, res) => {
-    try {
-        const { page = 1, limit = 50 } = req.query;
-        
-        const result = await pool.query(
-            `SELECT ct.*, 
-                    u.username as seller_username,
-                    u2.username as user_username,
-                    u.role as seller_role
-             FROM credit_transactions ct
-             JOIN users u ON ct.from_user_id = u.id AND u.role = 'seller'
-             JOIN users u2 ON ct.to_user_id = u2.id
-             ORDER BY ct.created_at DESC
-             LIMIT $1 OFFSET $2`,
-            [parseInt(limit), (parseInt(page) - 1) * parseInt(limit)]
+        await pool.query(
+            'UPDATE users SET is_active = $1 WHERE id = $2',
+            [is_active, userId]
         );
         
         res.json({ 
             success: true,
-            transactions: result.rows,
-            pagination: {
-                page: parseInt(page),
-                limit: parseInt(limit)
-            }
+            message: `Usuario ${is_active ? 'activado' : 'desactivado'} exitosamente`
         });
         
     } catch (error) {
-        console.error('Error obteniendo transacciones:', error);
+        console.error('Error cambiando estado:', error);
         res.status(500).json({ success: false, error: error.message });
     }
 });
 
-// Estadísticas de plataforma (admin only)
+// ========== ESTADÍSTICAS DE PLATAFORMA ==========
 router.get('/stats/platform', requireRole('admin'), async (req, res) => {
     try {
         const stats = await pool.query(`
@@ -249,8 +262,8 @@ router.get('/stats/platform', requireRole('admin'), async (req, res) => {
                 COUNT(CASE WHEN role = 'admin' THEN 1 END) as admin_count,
                 COUNT(CASE WHEN role = 'seller' THEN 1 END) as seller_count,
                 COUNT(CASE WHEN role = 'user' THEN 1 END) as user_count,
-                SUM(credits) as total_credits,
-                SUM(days_remaining) as total_days,
+                COALESCE(SUM(credits), 0) as total_credits,
+                COALESCE(SUM(days_remaining), 0) as total_days,
                 COUNT(CASE WHEN is_active = FALSE THEN 1 END) as inactive_users,
                 COUNT(CASE WHEN last_login >= NOW() - INTERVAL '7 days' THEN 1 END) as active_7d,
                 COUNT(CASE WHEN created_at >= NOW() - INTERVAL '30 days' THEN 1 END) as new_users_30d
@@ -260,8 +273,8 @@ router.get('/stats/platform', requireRole('admin'), async (req, res) => {
         const transactions = await pool.query(`
             SELECT 
                 COUNT(*) as total_transactions,
-                SUM(CASE WHEN transaction_type = 'credits' THEN amount ELSE 0 END) as total_credits_given,
-                SUM(CASE WHEN transaction_type = 'days' THEN amount ELSE 0 END) as total_days_given,
+                COALESCE(SUM(CASE WHEN transaction_type = 'credits' THEN amount ELSE 0 END), 0) as total_credits_given,
+                COALESCE(SUM(CASE WHEN transaction_type = 'days' THEN amount ELSE 0 END), 0) as total_days_given,
                 COUNT(DISTINCT from_user_id) as total_sellers_active,
                 COUNT(DISTINCT to_user_id) as total_users_credited
             FROM credit_transactions
@@ -282,31 +295,36 @@ router.get('/stats/platform', requireRole('admin'), async (req, res) => {
     }
 });
 
-// Desactivar/Activar usuario (admin only)
-router.put('/users/:userId/status', requireRole('admin'), async (req, res) => {
+// ========== OBTENER TRANSACCIONES DE SELLERS ==========
+router.get('/transactions/sellers', requireRole('admin'), async (req, res) => {
     try {
-        const { userId } = req.params;
-        const { is_active } = req.body;
+        const { page = 1, limit = 50 } = req.query;
+        const offset = (parseInt(page) - 1) * parseInt(limit);
         
-        if (typeof is_active !== 'boolean') {
-            return res.status(400).json({ 
-                success: false, 
-                error: 'is_active debe ser true o false' 
-            });
-        }
-        
-        await pool.query(
-            'UPDATE users SET is_active = $1 WHERE id = $2',
-            [is_active, userId]
+        const result = await pool.query(
+            `SELECT ct.*, 
+                    u.username as seller_username,
+                    u2.username as user_username,
+                    u.role as seller_role
+             FROM credit_transactions ct
+             JOIN users u ON ct.from_user_id = u.id AND u.role = 'seller'
+             JOIN users u2 ON ct.to_user_id = u2.id
+             ORDER BY ct.created_at DESC
+             LIMIT $1 OFFSET $2`,
+            [parseInt(limit), offset]
         );
         
         res.json({ 
             success: true,
-            message: `Usuario ${is_active ? 'activado' : 'desactivado'} exitosamente`
+            transactions: result.rows,
+            pagination: {
+                page: parseInt(page),
+                limit: parseInt(limit)
+            }
         });
         
     } catch (error) {
-        console.error('Error cambiando estado:', error);
+        console.error('Error obteniendo transacciones:', error);
         res.status(500).json({ success: false, error: error.message });
     }
 });
