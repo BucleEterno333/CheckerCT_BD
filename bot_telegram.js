@@ -150,33 +150,50 @@ function filtrarTarjetasDeTexto(textoSucio) {
 
 // ========== COMANDOS ==========
 
-// /start – Vincular cuenta y mostrar estado de servicios
-// /start – Primera vez: mensaje de registro; siguientes: estado de cuenta
+// /start – Manejo en privado y en grupos
 bot.onText(/\/start/, async (msg) => {
     const chatId = msg.chat.id;
-    const username = msg.from.username;
-    const firstName = msg.from.first_name || '';
+    const from = msg.from;
+    const chatType = msg.chat.type;
+
+    // Si el comando viene de un grupo y el usuario no se ha identificado
+    if (!from) {
+        return bot.sendMessage(chatId, '❌ No se pudo identificar al usuario. Por favor, usa el comando en un chat privado con el bot.');
+    }
+
+    // Usar el username si existe, de lo contrario usar el ID numérico como identificador único
+    const username = from.username || from.id.toString();
+    const firstName = from.first_name || '';
 
     try {
-        // Verificar si el usuario ya existe en la base de datos
+        // Verificar si el usuario ya existe
         const existingUser = await pool.query(
             'SELECT id, credits, days_remaining FROM users WHERE username = $1',
             [username]
         );
-
         const isNewUser = existingUser.rows.length === 0;
 
-        // Insertar o actualizar chat_id (siempre necesario)
-        await pool.query(
-            `INSERT INTO users (username, telegram_username, telegram_chat_id, created_at)
-             VALUES ($1, $2, $3, NOW())
-             ON CONFLICT (username) DO UPDATE 
-             SET telegram_chat_id = $3, updated_at = NOW()`,
-            [username, `@${username}`, chatId]
-        );
+        // Solo guardar el chat_id si es un chat privado (para poder enviarle mensajes luego)
+        if (chatType === 'private') {
+            await pool.query(
+                `INSERT INTO users (username, telegram_username, telegram_chat_id, created_at)
+                 VALUES ($1, $2, $3, NOW())
+                 ON CONFLICT (username) DO UPDATE 
+                 SET telegram_chat_id = $3, updated_at = NOW()`,
+                [username, `@${username}`, chatId]
+            );
+        } else {
+            // En grupos, solo aseguramos que el usuario exista (sin chat_id)
+            await pool.query(
+                `INSERT INTO users (username, telegram_username, created_at)
+                 VALUES ($1, $2, NOW())
+                 ON CONFLICT (username) DO NOTHING`,
+                [username, `@${username}`]
+            );
+        }
 
         if (isNewUser) {
-            // MENSAJE PARA PRIMERA VEZ
+            // Mensaje de primera vez (registro)
             const mensajeBienvenida = 
                 `👋 ¡Hola ${firstName}! 👋 \n\n` +
                 `He guardado tu Chat ID: <code>${chatId}</code>\n\n` +
@@ -189,10 +206,9 @@ bot.onText(/\/start/, async (msg) => {
                 `3. Recibirás un código de verificación aquí. \n\n` +
                 `4. Escríbelo en la página web, y comienza a livear y shippear ahora. \n\n` +
                 `                 👾 ¡Te esperamos! 👾`;
-
             await bot.sendMessage(chatId, mensajeBienvenida, { parse_mode: 'HTML' });
         } else {
-            // USUARIO YA EXISTE: mostrar créditos, días y servicios activos
+            // Usuario ya registrado: mostrar créditos y servicios
             const user = existingUser.rows[0];
             const credits = user.credits;
             const days = user.days_remaining;
@@ -214,15 +230,14 @@ bot.onText(/\/start/, async (msg) => {
                 `📅 *Días restantes:* ${days}\n\n` +
                 `${servicios}\n\n` +
                 `Usa /menu para ver todos los comandos.`;
-
             await bot.sendMessage(chatId, mensaje, { parse_mode: 'Markdown' });
         }
     } catch (error) {
-        console.error('Error en /start:', error);
-        bot.sendMessage(chatId, '❌ Hubo un error al procesar tu solicitud. Intenta más tarde.');
+        console.error('❌ Error en /start:', error);
+        // Envía el error detallado para depuración (puedes eliminarlo después)
+        await bot.sendMessage(chatId, `❌ Error: ${error.message}`);
     }
 });
-
 // /gencookie <país> – Genera cookie Amazon (cuesta 3 créditos)
 bot.onText(/\/gencookie\s+(\w+)/i, async (msg, match) => {
     const chatId = msg.chat.id;
