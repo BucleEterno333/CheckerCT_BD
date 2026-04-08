@@ -220,7 +220,7 @@ bot.onText(/\/extrapolador\s+(\d{6})/, async (msg, match) => {
     await bot.sendMessage(chatId, `🔍 Extrapolando para BIN ${bin}...`);
     try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 30000);
+        const timeoutId = setTimeout(() => controller.abort(), 300000);
         const response = await fetch(`${API_EXTRAPOLADOR_URL}/api/search-bin`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
