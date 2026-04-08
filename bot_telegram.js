@@ -183,7 +183,7 @@ bot.onText(/\/gencookie\s+(\w+)/i, async (msg, match) => {
     const user = await getUserByTelegramId(telegramId);
     if (!user) return bot.sendMessage(chatId, '❌ Usa /start primero.');
     if (user.credits < 3) return bot.sendMessage(chatId, '❌ Créditos insuficientes (3).');
-    await bot.sendMessage(chatId, `🔄 Generando cookie para ${country}... (hasta 2 min)`);
+    await bot.sendMessage(chatId, `🔄 Generando cookie para ${country}... (puede tardar hasta 5 min)`);
     try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 500000);

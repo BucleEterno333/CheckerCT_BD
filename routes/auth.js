@@ -73,8 +73,8 @@ router.post('/register', trackActivity, async (req, res) => {
                 `UPDATE users 
                  SET password_hash = $1, 
                      display_name = $2,
-                     credits = 20,
-                     days_remaining = 7,
+                     credits = 30,
+                     days_remaining = 5,
                      telegram_username = $3,
                      is_active = FALSE,
                      updated_at = NOW()

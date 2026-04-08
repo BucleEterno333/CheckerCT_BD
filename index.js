@@ -83,4 +83,49 @@ const startServer = async () => {
     }
 };
 
+const cron = require('node-cron');
+
+// ========== CRON JOB: RESTAR 1 DÍA A TODOS LOS USUARIOS A LAS 12:01 AM ==========
+// Programa la tarea para que se ejecute todos los días a las 00:01 (12:01 AM)
+cron.schedule('1 0 * * *', async () => {
+    console.log('🕒 Ejecutando tarea programada: restando 1 día a todos los usuarios...');
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        
+        // Restar 1 día a todos los usuarios que tengan days_remaining > 0
+        const result = await client.query(
+            `UPDATE users 
+             SET days_remaining = GREATEST(0, days_remaining - 1),
+                 updated_at = NOW()
+             WHERE days_remaining > 0
+             RETURNING id, username, days_remaining`
+        );
+        
+        // Registrar la operación en una tabla de logs (opcional)
+        await client.query(
+            `INSERT INTO system_logs (action, details, created_at)
+             VALUES ('daily_days_decrement', $1, NOW())`,
+            [JSON.stringify({
+                affected_users: result.rowCount,
+                timestamp: new Date().toISOString()
+            })]
+        );
+        
+        await client.query('COMMIT');
+        console.log(`✅ Días actualizados para ${result.rowCount} usuarios.`);
+        
+    } catch (error) {
+        await client.query('ROLLBACK');
+        console.error('❌ Error al actualizar días:', error);
+    } finally {
+        client.release();
+    }
+}, {
+    scheduled: true,
+    timezone: "America/Mexico_City"  // Ajusta a tu zona horaria
+});
+
+console.log('⏰ Tarea programada: restar 1 día a las 12:01 AM (hora CDMX)');
+
 startServer();
