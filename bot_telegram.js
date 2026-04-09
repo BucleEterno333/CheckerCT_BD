@@ -1,12 +1,12 @@
 // ============================================
 // BOT DE TELEGRAM - CIBERTERRORISTAS CHK
-// Versión final corregida
+// Versión final con comandos mejorados
 // ============================================
 
 const TelegramBot = require('node-telegram-bot-api');
 const { pool } = require('./database');
 
-// ========== CONFIGURACIÓN CON VALORES POR DEFECTO ==========
+// ========== CONFIGURACIÓN ==========
 const token = process.env.TELEGRAM_BOT_TOKEN;
 const INTERNAL_API_URL = process.env.INTERNAL_API_URL || 'http://basedatos:8080/api';
 const BOT_API_KEY = process.env.BOT_API_KEY || 'AALOL23894238HWKEJSNFSDGF';
@@ -21,7 +21,7 @@ if (!token) {
 const bot = new TelegramBot(token, { polling: true });
 console.log('🤖 Bot de Telegram inicializado');
 
-// ========== FUNCIONES PARA EXPORTAR (usadas por routes/telegram.js) ==========
+// ========== FUNCIONES PARA EXPORTAR ==========
 async function sendVerificationCodeToUser(username, code) {
     try {
         const userResult = await pool.query(
@@ -149,6 +149,21 @@ async function verificarTarjetasAmazon(tarjetas, cookies) {
     return resultados;
 }
 
+function calcularDigitoLuhn(numeroParcial) {
+    let suma = 0;
+    let esPar = true;
+    for (let i = numeroParcial.length - 1; i >= 0; i--) {
+        let digito = parseInt(numeroParcial[i]);
+        if (esPar) {
+            digito *= 2;
+            if (digito > 9) digito -= 9;
+        }
+        suma += digito;
+        esPar = !esPar;
+    }
+    return (10 - (suma % 10)) % 10;
+}
+
 // ========== COMANDOS ==========
 
 bot.onText(/\/start/, async (msg) => {
@@ -158,25 +173,67 @@ bot.onText(/\/start/, async (msg) => {
     const username = from.username || telegramId.toString();
     const firstName = from.first_name || '';
     const chatType = msg.chat.type;
+
     try {
         const existing = await getUserByTelegramId(telegramId);
         const isNew = !existing;
         await upsertUser(telegramId, username, chatId, chatType);
         if (isNew) {
-            await bot.sendMessage(chatId, `👋 ¡Hola ${firstName}! 👋\n\nHe guardado tu ID: <code>${telegramId}</code>\n\nRegístrate en: https://ciber7erroristaschk.com/login.html\nUsuario: @${username}\n\n👾 ¡Te esperamos!`, { parse_mode: 'HTML' });
+            const mensaje = 
+                `👋 ¡Hola ${firstName}! 👋 \n\n` +
+                `He guardado tu Chat ID: <code>${telegramId}</code>\n\n` +
+                `Ahora puedes registrarte en la web siguiendo estos pasos:\n\n` +
+                `1. Ve a la página:\n\n` +
+                `                 ꧁⎝ 𓆩༺✧༻𓆪 ⎠꧂\n` +
+                `https://ciber7erroristaschk.com/login.html\n` +
+                `                 ꧁⎝ 𓆩༺✧༻𓆪 ⎠꧂ \n\n` +
+                `2. Usa tu usuario: @${username}\n\n` +
+                `3. Recibirás un código de verificación aquí. \n\n` +
+                `4. Escríbelo en la página web, y comienza a livear y shippear ahora. \n\n` +
+                `                 👾 ¡Te esperamos! 👾`;
+            await bot.sendMessage(chatId, mensaje, { parse_mode: 'HTML' });
         } else {
-            await bot.sendMessage(chatId, `👋 ¡Hola ${firstName}!\n💰 Créditos: ${existing.credits}\n📅 Días: ${existing.days_remaining}\n\n✅ Servicios activos:\n• /gencookie MX\n• /extrapolador 123456\n• /chk amazon\n• /limpiador\n• /gen patrón\n\nUsa /menu`, { parse_mode: 'Markdown' });
+            const servicios = 
+                `*Servicios activos:*\n` +
+                `• Amazon (/chk amazon + tarjetas) Solo en web\n` +
+                `• Generador de cookies (/gencookie MX ✅)\n` +
+                `• Extrapolador (/extrapolador 557910) ✅\n` +
+                `• Generador de tarjetas (/gen patrón) ✅\n` +
+                `• Limpiador de texto (/limpiador) ✅\n`;
+            const mensaje = 
+                `👋 ¡Hola ${firstName}!\n\n` +
+                `💰 *Créditos:* ${existing.credits}\n` +
+                `📅 *Días restantes:* ${existing.days_remaining}\n\n` +
+                `${servicios}\n` +
+                `Usa /menu para ver todos los comandos.`;
+            await bot.sendMessage(chatId, mensaje, { parse_mode: 'Markdown' });
         }
     } catch (error) {
-        console.error(error);
-        bot.sendMessage(chatId, '❌ Error interno.');
+        console.error('Error en /start:', error);
+        await bot.sendMessage(chatId, '❌ Error interno.');
     }
 });
 
-bot.onText(/\/gencookie\s+(\w+)/i, async (msg, match) => {
+// /gencookie - permite país en el comando o interactivo
+bot.onText(/\/gencookie(?:\s+(\w+))?/i, async (msg, match) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
-    const country = match[1].toUpperCase();
+    let country = match[1] ? match[1].toUpperCase() : null;
+    if (!country) {
+        await bot.sendMessage(chatId, '🌎 ¿Para qué país deseas generar la cookie? (MX, US, CA, UK, DE, FR, IT, ES, JP, AU, IN)');
+        const response = await new Promise(resolve => {
+            const listener = (resp) => {
+                if (resp.chat.id === chatId && resp.text && !resp.text.startsWith('/')) {
+                    bot.removeListener('message', listener);
+                    resolve(resp.text.trim().toUpperCase());
+                }
+            };
+            bot.on('message', listener);
+            setTimeout(() => resolve(null), 60000);
+        });
+        if (!response) return bot.sendMessage(chatId, '❌ Tiempo agotado. Vuelve a intentar.');
+        country = response;
+    }
     if (!['MX','US','CA','UK','DE','FR','IT','ES','JP','AU','IN'].includes(country)) {
         return bot.sendMessage(chatId, `❌ País inválido. Usa: MX, US, CA, UK, DE, FR, IT, ES, JP, AU, IN`);
     }
@@ -214,9 +271,26 @@ bot.onText(/\/gencookie\s+(\w+)/i, async (msg, match) => {
     }
 });
 
-bot.onText(/\/extrapolador\s+(\d{6})/, async (msg, match) => {
+// /extrapolador - permite BIN en el comando o interactivo
+bot.onText(/\/extrapolador(?:\s+(\d{6}))?/, async (msg, match) => {
     const chatId = msg.chat.id;
-    const bin = match[1];
+    let bin = match[1];
+    if (!bin) {
+        await bot.sendMessage(chatId, '🔢 Por favor, ingresa el BIN de 6 dígitos para extrapolar:');
+        const response = await new Promise(resolve => {
+            const listener = (resp) => {
+                if (resp.chat.id === chatId && resp.text && !resp.text.startsWith('/')) {
+                    bot.removeListener('message', listener);
+                    resolve(resp.text.trim());
+                }
+            };
+            bot.on('message', listener);
+            setTimeout(() => resolve(null), 60000);
+        });
+        if (!response) return bot.sendMessage(chatId, '❌ Tiempo agotado.');
+        bin = response;
+    }
+    if (!/^\d{6}$/.test(bin)) return bot.sendMessage(chatId, '❌ BIN inválido. Debe tener 6 dígitos.');
     await bot.sendMessage(chatId, `🔍 Extrapolando para BIN ${bin}...`);
     try {
         const controller = new AbortController();
@@ -290,102 +364,143 @@ bot.onText(/\/extrapolador\s+(\d{6})/, async (msg, match) => {
     }
 });
 
-bot.onText(/\/gen\s+([^\s|]+\|\d{2}\|\d{2,4})(?:\s+(\d+))?/, async (msg, match) => {
+// /gen - permite patrón y cantidad en el comando o interactivo
+bot.onText(/\/gen(?:\s+([^\s|]+\|\d{2}\|\d{2,4})(?:\s+(\d+))?)?/, async (msg, match) => {
     const chatId = msg.chat.id;
     let patron = match[1];
-    let cantidad = match[2] ? parseInt(match[2]) : 10;
+    let cantidad = match[2] ? parseInt(match[2]) : null;
+    if (!patron) {
+        await bot.sendMessage(chatId, '🎴 Ingresa el patrón de la tarjeta (ej: 549949056298xxxx|05|2029) y opcionalmente la cantidad:');
+        const response = await new Promise(resolve => {
+            const listener = (resp) => {
+                if (resp.chat.id === chatId && resp.text && !resp.text.startsWith('/')) {
+                    bot.removeListener('message', listener);
+                    resolve(resp.text.trim());
+                }
+            };
+            bot.on('message', listener);
+            setTimeout(() => resolve(null), 60000);
+        });
+        if (!response) return bot.sendMessage(chatId, '❌ Tiempo agotado.');
+        const parts = response.split(' ');
+        patron = parts[0];
+        if (parts[1] && !isNaN(parseInt(parts[1]))) cantidad = parseInt(parts[1]);
+    }
+    if (cantidad === null) cantidad = 10;
     if (cantidad > 50) cantidad = 50;
     try {
         const partes = patron.split('|');
         let [numBase, mes, año] = partes;
         const cvv = partes[3] || 'rnd';
-        mes = mes.padStart(2,'0');
-        año = año.length===2 ? `20${año}` : año;
-        const digitosFijos = numBase.replace(/X/g,'');
-        const cantidadX = (numBase.match(/X/g)||[]).length;
-        const tarjetas = [];
-        for(let i=0;i<cantidad;i++){
-            let num = digitosFijos;
-            for(let j=0;j<cantidadX;j++) num += Math.floor(Math.random()*10);
-            if(num.length<16) num = num.padEnd(16,'0');
-            if(num.length>16) num = num.slice(0,16);
-            const cvvGen = cvv==='rnd' ? Math.floor(100+Math.random()*900).toString() : cvv;
-            tarjetas.push(`${num}|${mes}|${año}|${cvvGen}`);
+        mes = mes.padStart(2, '0');
+        año = año.length === 2 ? `20${año}` : año;
+        if (numBase.length !== 16 || !/^[0-9X]+$/.test(numBase)) {
+            throw new Error('El patrón del número debe tener 16 caracteres (dígitos o X)');
         }
-        const lista = tarjetas.slice(0,20).map((t,i)=>`${i+1}. \`${t}\``).join('\n');
-        const resto = tarjetas.length>20 ? `\n... y ${tarjetas.length-20} más` : '';
-        await bot.sendMessage(chatId, `🎴 *Tarjetas (${tarjetas.length}):*\n${lista}${resto}`, { parse_mode: 'Markdown' });
-    } catch(error) {
+        const tarjetas = [];
+        for (let i = 0; i < cantidad; i++) {
+            let numeroConX = '';
+            for (let char of numBase) {
+                if (char === 'X') {
+                    numeroConX += Math.floor(Math.random() * 10).toString();
+                } else {
+                    numeroConX += char;
+                }
+            }
+            const primeros15 = numeroConX.slice(0, 15);
+            const digitoControl = calcularDigitoLuhn(primeros15);
+            const numeroCompleto = primeros15 + digitoControl.toString();
+            const cvvGen = cvv === 'rnd' ? Math.floor(100 + Math.random() * 900).toString() : cvv;
+            tarjetas.push(`${numeroCompleto}|${mes}|${año}|${cvvGen}`);
+        }
+        const lista = tarjetas.slice(0, 20).map(t => `\`${t}\``).join('\n');
+        const resto = tarjetas.length > 20 ? `\n... y ${tarjetas.length - 20} más` : '';
+        await bot.sendMessage(chatId, `🎴 *Tarjetas generadas (${tarjetas.length}):*\n${lista}${resto}`, { parse_mode: 'Markdown' });
+    } catch (error) {
         bot.sendMessage(chatId, `❌ Error: ${error.message}`);
     }
 });
 
-bot.onText(/\/limpiador/, async (msg) => {
+// /limpiador - permite texto sucio en el comando o interactivo, resultado sin índices
+bot.onText(/\/limpiador(?:\s+(.+))?/, async (msg, match) => {
     const chatId = msg.chat.id;
-    await bot.sendMessage(chatId, '📝 Envía el texto sucio:');
-    const listener = async (responseMsg) => {
-        if (responseMsg.chat.id === chatId && responseMsg.text && !responseMsg.text.startsWith('/')) {
-            const tarjetas = limpiarTarjetas(responseMsg.text);
-            if (tarjetas.length === 0) bot.sendMessage(chatId, '❌ No se encontraron tarjetas.');
-            else {
-                const lista = tarjetas.slice(0,30).map((t,i)=>`${i+1}. \`${t}\``).join('\n');
-                bot.sendMessage(chatId, `🔍 *Tarjetas (${tarjetas.length}):*\n${lista}`, { parse_mode: 'Markdown' });
-            }
-            bot.removeListener('message', listener);
-        }
-    };
-    bot.on('message', listener);
+    let texto = match ? match[1] : null;
+    if (!texto) {
+        await bot.sendMessage(chatId, '📝 Envía el texto sucio con las tarjetas:');
+        const response = await new Promise(resolve => {
+            const listener = (resp) => {
+                if (resp.chat.id === chatId && resp.text && !resp.text.startsWith('/')) {
+                    bot.removeListener('message', listener);
+                    resolve(resp.text);
+                }
+            };
+            bot.on('message', listener);
+            setTimeout(() => resolve(null), 60000);
+        });
+        if (!response) return bot.sendMessage(chatId, '❌ Tiempo agotado.');
+        texto = response;
+    }
+    const tarjetas = limpiarTarjetas(texto);
+    if (tarjetas.length === 0) {
+        bot.sendMessage(chatId, '❌ No se encontraron tarjetas válidas en el texto.');
+    } else {
+        const lista = tarjetas.slice(0, 30).map(t => `\`${t}\``).join('\n');
+        const resto = tarjetas.length > 30 ? `\n... y ${tarjetas.length - 30} más` : '';
+        bot.sendMessage(chatId, `🔍 *Tarjetas encontradas (${tarjetas.length}):*\n${lista}${resto}`, { parse_mode: 'Markdown' });
+    }
 });
 
+// /chk amazon - primero pide la cookie, luego las tarjetas (orden inverso)
 bot.onText(/\/chk\s+amazon(?:\s+(.+))?/i, async (msg, match) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
-    let rawText = match[1];
-    if (!rawText) {
-        await bot.sendMessage(chatId, '📝 Envía las tarjetas:');
-        const listener = async (responseMsg) => {
-            if (responseMsg.chat.id === chatId && responseMsg.text && !responseMsg.text.startsWith('/')) {
-                await procesarChkAmazon(chatId, telegramId, responseMsg.text);
+    // Verificar créditos primero
+    const user = await getUserByTelegramId(telegramId);
+    if (!user) return bot.sendMessage(chatId, '❌ Usa /start primero.');
+    if (user.credits < 1) return bot.sendMessage(chatId, '❌ Necesitas 1 crédito para verificar.');
+    // Pedir cookie
+    await bot.sendMessage(chatId, '🔑 Por favor, envía la cookie de Amazon (puedes obtenerla con /gencookie).');
+    const cookieResp = await new Promise(resolve => {
+        const listener = (resp) => {
+            if (resp.chat.id === chatId && resp.text && !resp.text.startsWith('/')) {
                 bot.removeListener('message', listener);
+                resolve(resp.text.trim());
             }
         };
         bot.on('message', listener);
-        return;
-    }
-    await procesarChkAmazon(chatId, telegramId, rawText);
-});
-
-async function procesarChkAmazon(chatId, telegramId, rawText) {
-    try {
-        const tarjetas = limpiarTarjetas(rawText);
-        if (tarjetas.length === 0) return bot.sendMessage(chatId, '❌ No se encontraron tarjetas válidas.');
-        if (tarjetas.length > 20) return bot.sendMessage(chatId, `⚠️ Máximo 20 tarjetas (tienes ${tarjetas.length}).`);
-        const user = await getUserByTelegramId(telegramId);
-        if (!user) return bot.sendMessage(chatId, '❌ Usa /start primero.');
-        if (user.credits < 1) return bot.sendMessage(chatId, '❌ Necesitas 1 crédito.');
-        const newCredits = await deductCredits(telegramId, 1);
-        if (newCredits === null) return bot.sendMessage(chatId, '❌ Error al descontar créditos.');
-        await bot.sendMessage(chatId, '🔑 Ahora envía la cookie de Amazon (obtenla con /gencookie).');
-        const cookieListener = async (cookieMsg) => {
-            if (cookieMsg.chat.id === chatId && cookieMsg.text && !cookieMsg.text.startsWith('/')) {
-                const cookies = cookieMsg.text.trim();
-                await bot.sendMessage(chatId, `🔍 Verificando ${tarjetas.length} tarjetas...`);
-                const resultados = await verificarTarjetasAmazon(tarjetas, cookies);
-                let resumen = `📊 *Resultados* (Créditos restantes: ${newCredits})\n\n`;
-                for (const r of resultados) {
-                    const emoji = r.status === 'LIVE' ? '✅' : (r.status === 'DEAD' ? '❌' : '⚠️');
-                    resumen += `${emoji} \`${r.card}\` → ${r.status}\n${r.message ? `   ${r.message}\n` : ''}`;
-                }
-                await bot.sendMessage(chatId, resumen, { parse_mode: 'Markdown' });
-                bot.removeListener('message', cookieListener);
+        setTimeout(() => resolve(null), 60000);
+    });
+    if (!cookieResp) return bot.sendMessage(chatId, '❌ Tiempo agotado para la cookie.');
+    const cookies = cookieResp;
+    // Pedir tarjetas
+    await bot.sendMessage(chatId, '💳 Ahora envía las tarjetas (pueden estar en texto sucio):');
+    const cardsResp = await new Promise(resolve => {
+        const listener = async (resp) => {
+            if (resp.chat.id === chatId && resp.text && !resp.text.startsWith('/')) {
+                bot.removeListener('message', listener);
+                resolve(resp.text);
             }
         };
-        bot.on('message', cookieListener);
-    } catch(error) {
-        console.error(error);
-        bot.sendMessage(chatId, `❌ Error: ${error.message}`);
+        bot.on('message', listener);
+        setTimeout(() => resolve(null), 60000);
+    });
+    if (!cardsResp) return bot.sendMessage(chatId, '❌ Tiempo agotado para las tarjetas.');
+    const rawText = cardsResp;
+    const tarjetas = limpiarTarjetas(rawText);
+    if (tarjetas.length === 0) return bot.sendMessage(chatId, '❌ No se encontraron tarjetas válidas.');
+    if (tarjetas.length > 20) return bot.sendMessage(chatId, `⚠️ Máximo 20 tarjetas (tienes ${tarjetas.length}).`);
+    // Descontar crédito
+    const newCredits = await deductCredits(telegramId, 1);
+    if (newCredits === null) return bot.sendMessage(chatId, '❌ Error al descontar créditos.');
+    await bot.sendMessage(chatId, `🔍 Verificando ${tarjetas.length} tarjetas...`);
+    const resultados = await verificarTarjetasAmazon(tarjetas, cookies);
+    let resumen = `📊 *Resultados* (Créditos restantes: ${newCredits})\n\n`;
+    for (const r of resultados) {
+        const emoji = r.status === 'LIVE' ? '✅' : (r.status === 'DEAD' ? '❌' : '⚠️');
+        resumen += `${emoji} \`${r.card}\` → ${r.status}\n${r.message ? `   ${r.message}\n` : ''}`;
     }
-}
+    await bot.sendMessage(chatId, resumen, { parse_mode: 'Markdown' });
+});
 
 bot.onText(/\/creditos|\/credits|\/saldo|\/dias/, async (msg) => {
     const chatId = msg.chat.id;
@@ -412,7 +527,7 @@ bot.onText(/\/help/, async (msg) => {
         `/gen 549949056298xxxx|05|2029 [cantidad] - Generar tarjetas\n` +
         `/limpiador - Extraer tarjetas de texto sucio\n` +
         `/extrapolador 123456 - Buscar por BIN\n` +
-        `/chk amazon [texto] - Verificar tarjetas (1 crédito)\n` +
+        `/chk amazon - Verificar tarjetas (1 crédito, pide cookie y tarjetas)\n` +
         `/creditos - Ver saldo\n` +
         `/renovar - Contactar soporte\n` +
         `/id - Ver ID\n` +
@@ -443,7 +558,7 @@ bot.on('callback_query', async (callbackQuery) => {
         case 'menu_gencookie': respuesta = 'Usa `/gencookie MX` (o US, CA...). Cuesta 3 créditos.'; break;
         case 'menu_gen': respuesta = 'Usa `/gen 549949056298xxxx|05|2029 15`'; break;
         case 'menu_limpiador': respuesta = 'Usa `/limpiador` y luego envía el texto sucio.'; break;
-        case 'menu_chk': respuesta = 'Usa `/chk amazon` y luego envía las tarjetas.'; break;
+        case 'menu_chk': respuesta = 'Usa `/chk amazon` y sigue las instrucciones.'; break;
         case 'menu_creditos': respuesta = 'Usa `/creditos` para ver tu saldo.'; break;
         default: respuesta = 'Opción no válida.';
     }
