@@ -364,30 +364,39 @@ bot.onText(/\/extrapolador(?:\s+(\d{6}))?/, async (msg, match) => {
     }
 });
 
-// /gen - permite patrón y cantidad en el comando o interactivo
-bot.onText(/\/gen(?:\s+([^\s|]+\|\d{2}\|\d{2,4})(?:\s+(\d+))?)?/, async (msg, match) => {
+// ========== COMANDO /gen (sin argumentos) – modo interactivo ==========
+bot.onText(/^\/gen$/, async (msg) => {
+    const chatId = msg.chat.id;
+    await bot.sendMessage(chatId, '🎴 Ingresa el patrón de la tarjeta (ej: 549949056298xxxx|05|2029) y opcionalmente la cantidad:');
+    const response = await new Promise(resolve => {
+        const listener = (resp) => {
+            if (resp.chat.id === chatId && resp.text && !resp.text.startsWith('/')) {
+                bot.removeListener('message', listener);
+                resolve(resp.text.trim());
+            }
+        };
+        bot.on('message', listener);
+        setTimeout(() => resolve(null), 60000);
+    });
+    if (!response) return bot.sendMessage(chatId, '❌ Tiempo agotado.');
+    const parts = response.split(' ');
+    let patron = parts[0];
+    let cantidad = parts[1] && !isNaN(parseInt(parts[1])) ? parseInt(parts[1]) : 10;
+    if (cantidad > 50) cantidad = 50;
+    await generarTarjetas(chatId, patron, cantidad);
+});
+
+// ========== COMANDO /gen con argumentos (patrón y opcional cantidad) ==========
+bot.onText(/^\/gen\s+([^\s|]+\|\d{2}\|\d{2,4})(?:\s+(\d+))?/, async (msg, match) => {
     const chatId = msg.chat.id;
     let patron = match[1];
-    let cantidad = match[2] ? parseInt(match[2]) : null;
-    if (!patron) {
-        await bot.sendMessage(chatId, '🎴 Ingresa el patrón de la tarjeta (ej: 549949056298xxxx|05|2029) y opcionalmente la cantidad:');
-        const response = await new Promise(resolve => {
-            const listener = (resp) => {
-                if (resp.chat.id === chatId && resp.text && !resp.text.startsWith('/')) {
-                    bot.removeListener('message', listener);
-                    resolve(resp.text.trim());
-                }
-            };
-            bot.on('message', listener);
-            setTimeout(() => resolve(null), 60000);
-        });
-        if (!response) return bot.sendMessage(chatId, '❌ Tiempo agotado.');
-        const parts = response.split(' ');
-        patron = parts[0];
-        if (parts[1] && !isNaN(parseInt(parts[1]))) cantidad = parseInt(parts[1]);
-    }
-    if (cantidad === null) cantidad = 10;
+    let cantidad = match[2] ? parseInt(match[2]) : 10;
     if (cantidad > 50) cantidad = 50;
+    await generarTarjetas(chatId, patron, cantidad);
+});
+
+// Función auxiliar para generar tarjetas (evita duplicar código)
+async function generarTarjetas(chatId, patron, cantidad) {
     try {
         const partes = patron.split('|');
         let [numBase, mes, año] = partes;
@@ -419,7 +428,9 @@ bot.onText(/\/gen(?:\s+([^\s|]+\|\d{2}\|\d{2,4})(?:\s+(\d+))?)?/, async (msg, ma
     } catch (error) {
         bot.sendMessage(chatId, `❌ Error: ${error.message}`);
     }
-});
+}
+
+
 
 // /limpiador - permite texto sucio en el comando o interactivo, resultado sin índices
 bot.onText(/\/limpiador(?:\s+(.+))?/, async (msg, match) => {
