@@ -215,7 +215,7 @@ bot.onText(/\/start/, async (msg) => {
 });
 
 // /gencookie - permite país en el comando o interactivo
-bot.onText(/\/gencookie(?:\s+(\w+))?/i, async (msg, match) => {
+bot.onText(/^\/gencookie(?:\s+(\w+))?/i, async (msg, match) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
     let country = match[1] ? match[1].toUpperCase() : null;
