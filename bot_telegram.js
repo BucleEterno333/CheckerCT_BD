@@ -88,7 +88,7 @@ async function upsertUser(telegramId, username, chatId, chatType) {
 async function deductCredits(telegramId, amount = 3) {
     try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 15000);
+        const timeoutId = setTimeout(() => controller.abort(), 1500000);
         const response = await fetch(`${INTERNAL_API_URL}/user/bot/use-credits`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -131,7 +131,7 @@ async function verificarTarjetasAmazon(tarjetas, cookies) {
     for (const card of tarjetas) {
         try {
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 30000);
+            const timeoutId = setTimeout(() => controller.abort(), 3000000);
             const response = await fetch(`https://p01--amazonchk--vwr6mdxp7dhn.code.run/api/check-card`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -243,7 +243,7 @@ bot.onText(/\/gencookie(?:\s+(\w+))?/i, async (msg, match) => {
     await bot.sendMessage(chatId, `🔄 Generando cookie para ${country}... (puede tardar hasta 5 min)`);
     try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 500000);
+        const timeoutId = setTimeout(() => controller.abort(), 5000000);
         const response = await fetch(`${API_GENCOOKIE_URL}/generate`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -294,7 +294,7 @@ bot.onText(/\/extrapolador(?:\s+(\d{6}))?/, async (msg, match) => {
     await bot.sendMessage(chatId, `🔍 Extrapolando para BIN ${bin}...`);
     try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 300000);
+        const timeoutId = setTimeout(() => controller.abort(), 3000000);
         const response = await fetch(`${API_EXTRAPOLADOR_URL}/api/search-bin`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
