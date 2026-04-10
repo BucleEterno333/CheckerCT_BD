@@ -550,6 +550,7 @@ bot.onText(/\/menu/, async (msg) => {
         reply_markup: {
             inline_keyboard: [
                 [{ text: '🍪 Generar Cookie', callback_data: 'menu_gencookie' }],
+                [{ text: '🔍 Extrapolador', callback_data: 'menu_extrapolador' }],
                 [{ text: '🎴 Generar Tarjetas', callback_data: 'menu_gen' }],
                 [{ text: '🧹 Limpiador', callback_data: 'menu_limpiador' }],
                 [{ text: '🔍 Verificar Amazon', callback_data: 'menu_chk' }],
@@ -566,16 +567,17 @@ bot.on('callback_query', async (callbackQuery) => {
     const data = callbackQuery.data;
     let respuesta = '';
     switch(data){
-        case 'menu_gencookie': respuesta = 'Usa `/gencookie MX` (o US, CA...). Cuesta 3 créditos.'; break;
+        case 'menu_gencookie': respuesta = 'Obtén Usa `/gencookie MX` (o US, CA...). Cuesta 3 créditos.'; break;
+        case 'menu_chk': respuesta = 'Usa `/chk amazon` y sigue las instrucciones.'; break;
+        case 'menu_extrapolador': respuesta = 'Usa `/extrapolador 123456` para buscar por BIN.'; break;
         case 'menu_gen': respuesta = 'Usa `/gen 549949056298xxxx|05|2029 15`'; break;
         case 'menu_limpiador': respuesta = 'Usa `/limpiador` y luego envía el texto sucio.'; break;
-        case 'menu_chk': respuesta = 'Usa `/chk amazon` y sigue las instrucciones.'; break;
         case 'menu_creditos': respuesta = 'Usa `/creditos` para ver tu saldo.'; break;
         default: respuesta = 'Opción no válida.';
     }
     await bot.sendMessage(chatId, respuesta, { parse_mode: 'Markdown' });
     await bot.answerCallbackQuery(callbackQuery.id);
 });
-
+i
 module.exports = { bot, sendVerificationCodeToUser, sendLiveToTelegram };
 console.log('✅ Bot de Telegram listo');

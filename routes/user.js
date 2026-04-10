@@ -123,6 +123,34 @@ router.post('/use-credits', async (req, res) => {
     }
 });
 
+// POST /api/user/bot/increment-cookie-count - Incrementar contador desde el bot
+router.post('/bot/increment-cookie-count', async (req, res) => {
+    const { telegram_id, bot_key } = req.body;
+    if (bot_key !== BOT_API_KEY) {
+        return res.status(401).json({ success: false, error: 'No autorizado' });
+    }
+    try {
+        // Buscar user_id por telegram_id
+        const userRes = await pool.query('SELECT id FROM users WHERE telegram_id = $1', [telegram_id]);
+        if (userRes.rows.length === 0) {
+            return res.status(404).json({ success: false, error: 'Usuario no encontrado' });
+        }
+        const userId = userRes.rows[0].id;
+        await User.incrementCookieCount(userId);
+        // Registrar log en activity_logs (opcional)
+        await pool.query(
+            `INSERT INTO activity_logs (user_id, action_type, details, created_at)
+             VALUES ($1, 'cookie_generated_bot', $2, NOW())`,
+            [userId, JSON.stringify({ source: 'telegram_bot' })]
+        );
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Error incrementando cookie count (bot):', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+
 // Obtener perfil del usuario autenticado
 router.get('/profile', async (req, res) => {
     try {
