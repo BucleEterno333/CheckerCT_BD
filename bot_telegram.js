@@ -164,6 +164,25 @@ function calcularDigitoLuhn(numeroParcial) {
     return (10 - (suma % 10)) % 10;
 }
 
+async function incrementCookieCountBot(telegramId) {
+    try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
+        const response = await fetch(`${INTERNAL_API_URL}/user/bot/increment-cookie-count`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ telegram_id: telegramId, bot_key: BOT_API_KEY }),
+            signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+        const data = await response.json();
+        return data.success;
+    } catch (error) {
+        console.error('Error incrementando cookie count (bot):', error);
+        return false;
+    }
+}
+
 // ========== COMANDOS ==========
 
 bot.onText(/\/start/, async (msg) => {
@@ -259,12 +278,17 @@ bot.onText(/^\/gencookie(?:\s+(\w+))?/i, async (msg, match) => {
         const { phone, password, cookie_string, country: ctry } = data.data;
         let newCredits = null;
         try {
-            newCredits = await deductCredits(telegramId, 3);
+            newCredits = await deductCredits(telegramId, 4);
             if (newCredits === null) throw new Error('Fallo en descuento');
+            // Después de newCredits = await deductCredits(...)
+            if (newCredits !== null) {
+                await incrementCookieCountBot(telegramId);
+            }
         } catch(creditError) { console.error('Error descontando créditos:', creditError); }
         let msgText = `🍪 *Cookie ${ctry}*\n📞 Teléfono: \`${phone}\`\n🔑 Pass: \`${password}\`\n🍪 Cookie:\n\`\`\`\n${cookie_string}\n\`\`\``;
         msgText += (newCredits !== null) ? `\n💰 Créditos restantes: ${newCredits}` : `\n⚠️ No se pudieron actualizar tus créditos, pero la cookie es válida.`;
         await bot.sendMessage(chatId, msgText, { parse_mode: 'Markdown' });
+        
     } catch(error) {
         console.error(error);
         bot.sendMessage(chatId, `❌ Error: ${error.message}`);
