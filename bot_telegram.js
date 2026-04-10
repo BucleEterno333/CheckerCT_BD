@@ -578,7 +578,7 @@ bot.onText(/\/menu/, async (msg) => {
                 [{ text: '🎴 Generar Tarjetas', callback_data: 'menu_gen' }],
                 [{ text: '🧹 Limpiador', callback_data: 'menu_limpiador' }],
                 [{ text: '🔍 Verificar Amazon', callback_data: 'menu_chk' }],
-                [{ text: '💰 Créditos', callback_data: 'menu_creditos' }]
+                [{ text: '💰 Créditos', callback_data: 'menu_creditos' }],
             ]
         }
     };
@@ -602,6 +602,6 @@ bot.on('callback_query', async (callbackQuery) => {
     await bot.sendMessage(chatId, respuesta, { parse_mode: 'Markdown' });
     await bot.answerCallbackQuery(callbackQuery.id);
 });
-i
+
 module.exports = { bot, sendVerificationCodeToUser, sendLiveToTelegram };
 console.log('✅ Bot de Telegram listo');
