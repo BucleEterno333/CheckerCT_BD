@@ -85,7 +85,7 @@ async function upsertUser(telegramId, username, chatId, chatType) {
     }
 }
 
-async function deductCredits(telegramId, amount = 3) {
+async function deductCredits(telegramId, amount = 4) {
     try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 1500000);
@@ -250,7 +250,7 @@ bot.onText(/^\/gencookie(?:\s+(\w+))?/i, async (msg, match) => {
             bot.on('message', listener);
             setTimeout(() => resolve(null), 60000);
         });
-        if (!response) return bot.sendMessage(chatId, '❌ Tiempo agotado. Vuelve a intentar.');
+        if (!response) return bot.sendMessage(chatId, '❌ No se ha recibido ningún país para generar la cookieg. Vuelve a intentar.');
         country = response;
     }
     if (!['MX','US','CA','UK','DE','FR','IT','ES','JP','AU','IN'].includes(country)) {
@@ -258,7 +258,7 @@ bot.onText(/^\/gencookie(?:\s+(\w+))?/i, async (msg, match) => {
     }
     const user = await getUserByTelegramId(telegramId);
     if (!user) return bot.sendMessage(chatId, '❌ Usa /start primero.');
-    if (user.credits < 3) return bot.sendMessage(chatId, '❌ Créditos insuficientes (3).');
+    if (user.credits < 4) return bot.sendMessage(chatId, '❌ Créditos insuficientes (4).');
     await bot.sendMessage(chatId, `🔄 Generando cookie para ${country}... (puede tardar hasta 5 min)`);
     try {
         const controller = new AbortController();
@@ -311,7 +311,7 @@ bot.onText(/\/extrapolador(?:\s+(\d{6}))?/, async (msg, match) => {
             bot.on('message', listener);
             setTimeout(() => resolve(null), 60000);
         });
-        if (!response) return bot.sendMessage(chatId, '❌ Tiempo agotado.');
+        if (!response) return bot.sendMessage(chatId, '❌ No se ha recibido ningún BIN para extrapolar. Vuelve a intentarlo.');
         bin = response;
     }
     if (!/^\d{6}$/.test(bin)) return bot.sendMessage(chatId, '❌ BIN inválido. Debe tener 6 dígitos.');
@@ -402,7 +402,7 @@ bot.onText(/^\/gen$/, async (msg) => {
         bot.on('message', listener);
         setTimeout(() => resolve(null), 60000);
     });
-    if (!response) return bot.sendMessage(chatId, '❌ Tiempo agotado.');
+        if (!response) return bot.sendMessage(chatId, '❌ No se ha recibido ningún extra para generar tarjetas. Vuelve a intentarlo.');
     const parts = response.split(' ');
     let patron = parts[0];
     let cantidad = parts[1] && !isNaN(parseInt(parts[1])) ? parseInt(parts[1]) : 10;
@@ -472,7 +472,7 @@ bot.onText(/\/limpiador(?:\s+(.+))?/, async (msg, match) => {
             bot.on('message', listener);
             setTimeout(() => resolve(null), 60000);
         });
-        if (!response) return bot.sendMessage(chatId, '❌ Tiempo agotado.');
+        if (!response) return bot.sendMessage(chatId, '❌ No se ha recibido ningún texto sucio para limpiar. Vuelve a intentarlo.');
         texto = response;
     }
     const tarjetas = limpiarTarjetas(texto);
@@ -505,7 +505,7 @@ bot.onText(/\/chk\s+amazon(?:\s+(.+))?/i, async (msg, match) => {
         bot.on('message', listener);
         setTimeout(() => resolve(null), 60000);
     });
-    if (!cookieResp) return bot.sendMessage(chatId, '❌ Tiempo agotado para la cookie.');
+    if (!cookieResp) return bot.sendMessage(chatId, '❌ No se ha recibido ninguna cookie para checar tarjetas en Amazon. Vuelve a intentarlo.');
     const cookies = cookieResp;
     // Pedir tarjetas
     await bot.sendMessage(chatId, '💳 Ahora envía las tarjetas (pueden estar en texto sucio):');
@@ -519,7 +519,7 @@ bot.onText(/\/chk\s+amazon(?:\s+(.+))?/i, async (msg, match) => {
         bot.on('message', listener);
         setTimeout(() => resolve(null), 60000);
     });
-    if (!cardsResp) return bot.sendMessage(chatId, '❌ Tiempo agotado para las tarjetas.');
+    if (!cardsResp) return bot.sendMessage(chatId, '❌ No se ha recibido ninguna tarjeta para checar en Amazon. Vuelve a intentarlo.');
     const rawText = cardsResp;
     const tarjetas = limpiarTarjetas(rawText);
     if (tarjetas.length === 0) return bot.sendMessage(chatId, '❌ No se encontraron tarjetas válidas.');
@@ -558,10 +558,10 @@ bot.onText(/\/help/, async (msg) => {
     bot.sendMessage(msg.chat.id,
         `📖 *Comandos:*\n` +
         `/start - Vincular cuenta\n` +
-        `/gencookie MX (o US,CA...) - Generar cookie (3 créditos)\n` +
+        `/gencookie MX (o US,CA...) - Generar cookie (4 créditos)\n` +
         `/gen 549949056298xxxx|05|2029 [cantidad] - Generar tarjetas\n` +
         `/limpiador - Extraer tarjetas de texto sucio\n` +
-        `/extrapolador 123456 - Buscar por BIN\n` +
+        `/extrapolador 557910 - Buscar por BIN (10 créditos)\n` +
         `/chk amazon - Verificar tarjetas (1 crédito, pide cookie y tarjetas)\n` +
         `/creditos - Ver saldo\n` +
         `/renovar - Contactar soporte\n` +
