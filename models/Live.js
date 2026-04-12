@@ -293,6 +293,125 @@ class Live {
         
         return result.rows[0];
     }
+
+
+    // Crear acción con action_data
+    static async addActionWithData(actionData) {
+        const {
+            live_id, user_id, action_type, page_id, page_name, account_id,
+            amount, currency, product_name, is_direct_payment, rest_days,
+            response_id, response_text, transferred_to, transfer_result,
+            action_date, device_used, notes, action_data = {}
+        } = actionData;
+
+        const client = await pool.connect();
+        try {
+            await client.query('BEGIN');
+
+            const result = await client.query(
+                `INSERT INTO live_actions 
+                (live_id, user_id, action_type, page_id, page_name, account_id,
+                amount, currency, product_name, is_direct_payment, rest_days,
+                response_id, response_text, transferred_to, transfer_result,
+                action_date, device_used, notes, action_data, action_time)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 
+                        $14, $15, $16, $17, $18, $19, NOW())
+                RETURNING id`,
+                [
+                    live_id, user_id, action_type, page_id, page_name, account_id,
+                    amount, currency, product_name, is_direct_payment, rest_days,
+                    response_id, response_text, transferred_to, transfer_result,
+                    action_date || new Date().toISOString().split('T')[0],
+                    device_used, notes, action_data
+                ]
+            );
+
+            await client.query('COMMIT');
+            return result.rows[0];
+        } catch (error) {
+            await client.query('ROLLBACK');
+            throw error;
+        } finally {
+            client.release();
+        }
+    }
+
+    // Transferir tarjeta a otro usuario
+    static async transferCard(liveId, fromUserId, toUserId, contactId, pageId, resultText, notes = '') {
+        const client = await pool.connect();
+        try {
+            await client.query('BEGIN');
+
+            // Obtener la tarjeta original
+            const cardResult = await client.query(
+                'SELECT * FROM user_lives WHERE id = $1 AND user_id = $2',
+                [liveId, fromUserId]
+            );
+            if (cardResult.rows.length === 0) throw new Error('Tarjeta no encontrada');
+
+            const originalCard = cardResult.rows[0];
+
+            // Insertar copia para el receptor
+            const newCardResult = await client.query(
+                `INSERT INTO user_lives 
+                (user_id, card_full, card_last_four, card_bin, card_type, gate_name,
+                check_date, status, phase, notes, created_at)
+                VALUES ($1, $2, $3, $4, $5, $6, NOW(), 'unknown', 'pending', $7, NOW())
+                RETURNING id`,
+                [
+                    toUserId,
+                    originalCard.card_full,
+                    originalCard.card_last_four,
+                    originalCard.card_bin,
+                    originalCard.card_type,
+                    originalCard.gate_name,
+                    `Transferida por usuario ${fromUserId}`
+                ]
+            );
+            const newLiveId = newCardResult.rows[0].id;
+
+            // Crear acción de "live obtenida" para el receptor
+            await client.query(
+                `INSERT INTO live_actions 
+                (live_id, user_id, action_type, page_name, action_data, action_date, notes, action_time)
+                VALUES ($1, $2, 'live_obtained', $3, $4, NOW(), $5, NOW())`,
+                [
+                    newLiveId,
+                    toUserId,
+                    originalCard.gate_name,
+                    JSON.stringify({ transferred_from: fromUserId, contact_id: contactId }),
+                    `Tarjeta transferida por contacto ID ${contactId}`
+                ]
+            );
+
+            // Crear acción de transferencia para el emisor
+            await client.query(
+                `INSERT INTO live_actions 
+                (live_id, user_id, action_type, page_id, page_name, transferred_to, response_text, action_data, action_date, notes, action_time)
+                VALUES ($1, $2, 'transferred', $3, $4, $5, $6, $7, NOW(), $8, NOW())`,
+                [
+                    liveId,
+                    fromUserId,
+                    pageId,
+                    (await client.query('SELECT name FROM pages WHERE id = $1', [pageId])).rows[0]?.name,
+                    `Usuario ${toUserId}`,
+                    resultText,
+                    JSON.stringify({ contact_id: contactId, to_user_id: toUserId }),
+                    notes
+                ]
+            );
+
+            await client.query('COMMIT');
+            return { newLiveId, toUserId };
+        } catch (error) {
+            await client.query('ROLLBACK');
+            throw error;
+        } finally {
+            client.release();
+        }
+    }
+
+
 }
 
 

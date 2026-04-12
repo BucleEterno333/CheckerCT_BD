@@ -4,6 +4,8 @@ const router = express.Router();
 const { authenticate, requireRole, trackActivity } = require('../middleware/auth');
 const Live = require('../models/Live');
 const Account = require('../models/Account');
+const Contact = require('../models/Contact');
+const { bot } = require('../bot_telegram'); // si quieres notificar
 const { pool } = require('../database');
 
 router.use(authenticate);
@@ -222,6 +224,47 @@ router.put('/:liveId', async (req, res) => {
         res.json({ success: true, live: result.rows[0] });
     } catch (error) {
         console.error('Error actualizando live:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+
+// Transferir tarjeta a otro usuario (contacto)
+router.post('/:liveId/transfer', async (req, res) => {
+    try {
+        const { liveId } = req.params;
+        const { contact_id, page_id, result, notes } = req.body;
+        if (!contact_id || !page_id) {
+            return res.status(400).json({ success: false, error: 'contact_id y page_id requeridos' });
+        }
+
+        // Obtener contacto
+        const contact = await Contact.getUserContacts(req.user.id).then(contacts => contacts.find(c => c.id == contact_id));
+        if (!contact) return res.status(404).json({ success: false, error: 'Contacto no encontrado' });
+        if (!contact.is_system_user || !contact.system_user_id) {
+            return res.status(400).json({ success: false, error: 'El contacto no tiene cuenta en el sistema' });
+        }
+
+        const transferResult = await Live.transferCard(liveId, req.user.id, contact.system_user_id, contact_id, page_id, result, notes);
+
+        // Enviar notificación por Telegram si el receptor tiene chat_id
+        const receiverUser = await pool.query('SELECT telegram_chat_id FROM users WHERE id = $1', [transferResult.toUserId]);
+        if (receiverUser.rows[0]?.telegram_chat_id && bot) {
+            const card = await pool.query('SELECT card_last_four, gate_name FROM user_lives WHERE id = $1', [liveId]);
+            await bot.sendMessage(
+                receiverUser.rows[0].telegram_chat_id,
+                `🔔 *Te han transferido una tarjeta*\n\n` +
+                `📌 Terminación: ${card.rows[0].card_last_four}\n` +
+                `🛒 Gate: ${card.rows[0].gate_name}\n` +
+                `👤 Transferido por: ${req.user.username}\n\n` +
+                `Revisa "Mis tarjetas" para ver los detalles.`,
+                { parse_mode: 'Markdown' }
+            );
+        }
+
+        res.json({ success: true, message: 'Tarjeta transferida', newLiveId: transferResult.newLiveId });
+    } catch (error) {
+        console.error('Error transfiriendo tarjeta:', error);
         res.status(500).json({ success: false, error: error.message });
     }
 });

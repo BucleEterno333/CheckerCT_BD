@@ -46,16 +46,24 @@ const adminRoutes = require('./routes/admin');
 const sellerRoutes = require('./routes/seller');
 const livesRoutes = require('./routes/lives');
 const accountsRoutes = require('./routes/accounts');
-const telegramRoutes = require('./routes/telegram'); // 👈 NUEVA LÍNEA
+const telegramRoutes = require('./routes/telegram');
 const userRoutes = require ('./routes/user')
+const gatesRoutes = require('./routes/gates');
+const contactsRoutes = require('./routes/contacts');
+const userAccountsRoutes = require('./routes/user-accounts');
+const userResponsesRoutes = require('./routes/user-responses');
 
 app.use('/api/auth', authRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/seller', sellerRoutes);
 app.use('/api/lives', livesRoutes);
 app.use('/api/accounts', accountsRoutes);
-app.use('/api/telegram', telegramRoutes); // 👈 NUEVA LÍNEA
-app.use('/api/user', userRoutes); // 👈 NUEVA LÍNEA
+app.use('/api/telegram', telegramRoutes); 
+app.use('/api/user', userRoutes);
+app.use('/api/gates', gatesRoutes);
+app.use('/api/contacts', contactsRoutes);
+app.use('/api/user-accounts', userAccountsRoutes);
+app.use('/api/user-responses', userResponsesRoutes);
 
 
 
