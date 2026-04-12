@@ -2,7 +2,7 @@
 const express = require('express');
 const router = express.Router();
 const { authenticate, trackActivity } = require('../middleware/auth');
-const Account = require('../models/Account');
+const Account = require('../models/UserAccount');
 
 // Todas las rutas requieren autenticación
 router.use(authenticate);
