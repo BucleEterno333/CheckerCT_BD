@@ -6,25 +6,17 @@ const { initDatabase } = require('./database');
 const app = express();
 const PORT = process.env.PORT || 8080; 
 
-// Permitir múltiples orígenes (el antiguo y el nuevo)
-const allowedOrigins = [
-    'https://ciberterroristaschk.shop',
-    'https://silver-chinchilla-366445.hostingersite.com'
-];
 
+// 1. CORS
 app.use(cors({
-    origin: function(origin, callback) {
-        // Permitir solicitudes sin origen (como herramientas locales, Postman)
-        if (!origin) return callback(null, true);
-        if (allowedOrigins.indexOf(origin) === -1) {
-            const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
-            return callback(new Error(msg), false);
-        }
-        return callback(null, true);
-    },
+    origin: ['https://ciber7erroristaschk.com', 'https://silver-chinchilla-366445.hostingersite.com'],
     credentials: true,
     optionsSuccessStatus: 200
 }));
+
+// 2. Parseo de JSON (IMPORTANTE: ANTES de las rutas)
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 // RUTA RAIZ - IMPORTANTE
 app.get('/', (req, res) => {
