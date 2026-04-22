@@ -42,8 +42,8 @@ async function getUserRoleByTelegramId(telegramId) {
     return res.rows[0]?.role;
 }
 
-// Comando /toggle
-bot.onText(/\/toggle/, async (msg) => {
+// Comando /apagar
+bot.onText(/\/apagar/, async (msg) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
 
