@@ -21,10 +21,19 @@ if (!token) {
 const bot = new TelegramBot(token, { polling: true });
 console.log('🤖 Bot de Telegram inicializado');
 
+// Mapa para rastrear usuarios en proceso de generación
+const processingUsers = new Map();
 
 
-
-
+// Función para limpiar el estado después de un tiempo (seguridad)
+function scheduleCleanup(telegramId, timeoutMs = 300000) { // 5 minutos máximo
+    setTimeout(() => {
+        if (processingUsers.has(telegramId)) {
+            console.log(`⚠️ Limpieza automática para usuario ${telegramId} después de timeout`);
+            processingUsers.delete(telegramId);
+        }
+    }, timeoutMs);
+}
 
 
 // Función para obtener rol por telegram_id
@@ -286,61 +295,86 @@ bot.onText(/\/start/, async (msg) => {
 bot.onText(/^\/gencookie(?:\s+(\w+))?/i, async (msg, match) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
-    let country = match[1] ? match[1].toUpperCase() : null;
-    if (!country) {
-        await bot.sendMessage(chatId, '🌎 ¿Para qué país deseas generar la cookie? (MX, US, CA, UK, DE, FR, IT, ES, JP, AU, IN)');
-        const response = await new Promise(resolve => {
-            const listener = (resp) => {
-                if (resp.chat.id === chatId && resp.text && !resp.text.startsWith('/')) {
-                    bot.removeListener('message', listener);
-                    resolve(resp.text.trim().toUpperCase());
-                }
-            };
-            bot.on('message', listener);
-            setTimeout(() => resolve(null), 60000);
-        });
-        if (!response) return bot.sendMessage(chatId, '❌ No se ha recibido ningún país para generar la cookieg. Vuelve a intentar.');
-        country = response;
+
+    // Bloquear si ya tiene una generación activa
+    if (processingUsers.has(telegramId)) {
+        return bot.sendMessage(chatId, '⏳ Ya tienes una generación de cookie en curso. Espera a que termine antes de iniciar otra.');
     }
-    if (!['MX','US','CA','UK','DE','FR','IT','ES','JP','AU','IN'].includes(country)) {
-        return bot.sendMessage(chatId, `❌ País inválido. Usa: MX, US, CA, UK, DE, FR, IT, ES, JP, AU, IN`);
-    }
-    const user = await getUserByTelegramId(telegramId);
-    if (!user) return bot.sendMessage(chatId, '❌ Usa /start primero.');
-    if (user.credits < 4) return bot.sendMessage(chatId, '❌ Créditos insuficientes (4).');
-    await bot.sendMessage(chatId, `🔄 Generando cookie para ${country}... (puede tardar hasta 5 min)`);
+
+    // Marcar como en proceso
+    processingUsers.set(telegramId, Date.now());
+    scheduleCleanup(telegramId);
+
     try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 5000000);
-        const response = await fetch(`${API_GENCOOKIE_URL}/generate`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ country, add_address: true }),
-            signal: controller.signal
-        });
-        clearTimeout(timeoutId);
-        const textResponse = await response.text();
-        if (!response.ok) throw new Error(`HTTP ${response.status}: ${textResponse.substring(0,100)}`);
-        let data;
-        try { data = JSON.parse(textResponse); } catch(e) { throw new Error('Respuesta no es JSON'); }
-        if (!data.success || !data.data) throw new Error(data.error || 'Error del generador');
-        const { phone, password, cookie_string, country: ctry } = data.data;
-        let newCredits = null;
+
+        let country = match[1] ? match[1].toUpperCase() : null;
+        if (!country) {
+            await bot.sendMessage(chatId, '🌎 ¿Para qué país deseas generar la cookie? (MX, US, CA, UK, DE, FR, IT, ES, JP, AU, IN)');
+            const response = await new Promise(resolve => {
+                const listener = (resp) => {
+                    if (resp.chat.id === chatId && resp.text && !resp.text.startsWith('/')) {
+                        bot.removeListener('message', listener);
+                        resolve(resp.text.trim().toUpperCase());
+                    }
+                };
+                bot.on('message', listener);
+                setTimeout(() => resolve(null), 60000);
+            });
+            if (!response) return bot.sendMessage(chatId, '❌ No se ha recibido ningún país para generar la cookieg. Vuelve a intentar.');
+            country = response;
+        }
+        if (!['MX','US','CA','UK','DE','FR','IT','ES','JP','AU','IN'].includes(country)) {
+            return bot.sendMessage(chatId, `❌ País inválido. Usa: MX, US, CA, UK, DE, FR, IT, ES, JP, AU, IN`);
+        }
+        const user = await getUserByTelegramId(telegramId);
+        if (!user) return bot.sendMessage(chatId, '❌ Usa /start primero.');
+        if (user.credits < 4) return bot.sendMessage(chatId, '❌ Créditos insuficientes (4).');
+        await bot.sendMessage(chatId, `🔄 Generando cookie para ${country}... (puede tardar hasta 5 min)`);
         try {
-            newCredits = await deductCredits(telegramId, 4);
-            if (newCredits === null) throw new Error('Fallo en descuento');
-            // Después de newCredits = await deductCredits(...)
-            if (newCredits !== null) {
-                await incrementCookieCountBot(telegramId);
-            }
-        } catch(creditError) { console.error('Error descontando créditos:', creditError); }
-        let msgText = `🍪 *Cookie ${ctry}*\n📞 Teléfono: \`${phone}\`\n🔑 Pass: \`${password}\`\n🍪 Cookie:\n\`\`\`\n${cookie_string}\n\`\`\``;
-        msgText += (newCredits !== null) ? `\n💰 Créditos restantes: ${newCredits}` : `\n⚠️ No se pudieron actualizar tus créditos, pero la cookie es válida.`;
-        await bot.sendMessage(chatId, msgText, { parse_mode: 'Markdown' });
-        
-    } catch(error) {
-        console.error(error);
-        bot.sendMessage(chatId, `❌ Error: ${error.message}`);
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 5000000);
+            const response = await fetch(`${API_GENCOOKIE_URL}/generate`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ country, add_address: true }),
+                signal: controller.signal
+            });
+            clearTimeout(timeoutId);
+            const textResponse = await response.text();
+            if (!response.ok) throw new Error(`HTTP ${response.status}: ${textResponse.substring(0,100)}`);
+            let data;
+            try { data = JSON.parse(textResponse); } catch(e) { throw new Error('Respuesta no es JSON'); }
+            if (!data.success || !data.data) throw new Error(data.error || 'Error del generador');
+            const { phone, password, cookie_string, country: ctry } = data.data;
+            let newCredits = null;
+            try {
+                newCredits = await deductCredits(telegramId, 4);
+                if (newCredits === null) throw new Error('Fallo en descuento');
+                // Después de newCredits = await deductCredits(...)
+                if (newCredits !== null) {
+                    await incrementCookieCountBot(telegramId);
+                }
+            } catch(creditError) { console.error('Error descontando créditos:', creditError); }
+            let msgText = `🍪 *Cookie ${ctry}*\n📞 Teléfono: \`${phone}\`\n🔑 Pass: \`${password}\`\n🍪 Cookie:\n\`\`\`\n${cookie_string}\n\`\`\``;
+            msgText += (newCredits !== null) ? `\n💰 Créditos restantes: ${newCredits}` : `\n⚠️ No se pudieron actualizar tus créditos, pero la cookie es válida.`;
+            await bot.sendMessage(chatId, msgText, { parse_mode: 'Markdown' });
+            
+        } catch(error) {
+            console.error(error);
+            bot.sendMessage(chatId, `❌ Error: ${error.message}`);
+        }
+
+        if (user.credits < 4) {
+            processingUsers.delete(telegramId);
+            return bot.sendMessage(chatId, '❌ Créditos insuficientes (4).');
+        }
+
+    } catch (error) {
+        console.error('Error en /gencookie:', error);
+        await bot.sendMessage(chatId, `❌ Error: ${error.message}`);
+    } finally {
+        // Liberar siempre al finalizar (éxito o error)
+        processingUsers.delete(telegramId);
     }
 });
 
