@@ -6,13 +6,25 @@ const { initDatabase } = require('./database');
 const app = express();
 const PORT = process.env.PORT || 8080; 
 
-// Middleware SIMPLIFICADO temporalmente
+// Permitir múltiples orígenes (el antiguo y el nuevo)
+const allowedOrigins = [
+    'https://ciberterroristaschk.shop',
+    'https://silver-chinchilla-366445.hostingersite.com'
+];
+
 app.use(cors({
-    origin: 'https://ciber7erroristaschk.com',
+    origin: function(origin, callback) {
+        // Permitir solicitudes sin origen (como herramientas locales, Postman)
+        if (!origin) return callback(null, true);
+        if (allowedOrigins.indexOf(origin) === -1) {
+            const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
+            return callback(new Error(msg), false);
+        }
+        return callback(null, true);
+    },
     credentials: true,
     optionsSuccessStatus: 200
 }));
-app.use(express.json());
 
 // RUTA RAIZ - IMPORTANTE
 app.get('/', (req, res) => {
