@@ -5,6 +5,7 @@ const User = require('../models/User');
 const { pool } = require('../database');
 const { getSetting, setSetting } = require('../database');
 const SERVICE_API_KEY = process.env.SERVICE_API_KEY;
+const BOT_API_KEY = process.env.BOT_API_KEY;
 
 
 // Todas las rutas requieren autenticación
@@ -23,6 +24,23 @@ router.get('/service-status', authenticate, async (req, res) => {
     }
 });
 
+// routes/admin.js - agregar este endpoint
+
+router.post('/bot/toggle-service', async (req, res) => {
+    // Verificar la clave del bot (puede venir en header x-bot-key o Authorization)
+    const botKey = req.headers['x-bot-key'] || req.headers['authorization']?.split(' ')[1];
+    if (botKey !== BOT_API_KEY) {
+        return res.status(401).json({ success: false, error: 'No autorizado' });
+    }
+    try {
+        const current = await getSetting('cookie_generator_enabled', true);
+        const newStatus = !current;
+        await setSetting('cookie_generator_enabled', newStatus, null); // null porque es el bot
+        res.json({ success: true, enabled: newStatus });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
 
 const botAuth = (req, res, next) => {
     const authHeader = req.headers.authorization;

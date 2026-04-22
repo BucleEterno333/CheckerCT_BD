@@ -42,11 +42,11 @@ async function getUserRoleByTelegramId(telegramId) {
     return res.rows[0]?.role;
 }
 
-// Comando /apagar
-bot.onText(/\/apagar/, async (msg) => {
+bot.onText(/\/estatusCuki/, async (msg) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
 
+    // Verificar si el usuario es admin (por su rol en la BD)
     const role = await getUserRoleByTelegramId(telegramId);
     if (role !== 'admin') {
         return bot.sendMessage(chatId, '❌ No tienes permiso para usar este comando. Solo administradores.');
@@ -55,11 +55,11 @@ bot.onText(/\/apagar/, async (msg) => {
     try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 10000);
-        const response = await fetch(`${INTERNAL_API_URL}/admin/toggle-service`, {
+        const response = await fetch(`${INTERNAL_API_URL}/admin/bot/toggle-service`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${BOT_API_KEY}`  // O usa el token que prefieras
+                'x-bot-key': BOT_API_KEY   // ← clave del bot
             },
             signal: controller.signal
         });
@@ -72,11 +72,10 @@ bot.onText(/\/apagar/, async (msg) => {
             bot.sendMessage(chatId, `Error: ${data.error}`);
         }
     } catch (error) {
+        console.error('Error en /estatusCuki:', error);
         bot.sendMessage(chatId, `Error: ${error.message}`);
     }
 });
-
-
 
 
 // ========== FUNCIONES PARA EXPORTAR ==========
