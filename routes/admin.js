@@ -9,7 +9,15 @@ const BOT_API_KEY = process.env.BOT_API_KEY;
 
 
 
-// routes/admin.js - agregar este endpoint
+const botAuth = (req, res, next) => {
+    const authHeader = req.headers.authorization;
+    const token = authHeader && authHeader.split(' ')[1];
+    if (token !== process.env.BOT_API_KEY) {
+        return res.status(401).json({ success: false, error: 'No autorizado' });
+    }
+    next();
+};
+
 
 router.post('/bot/toggle-service', async (req, res) => {
     // Verificar la clave del bot (puede venir en header x-bot-key o Authorization)
@@ -73,14 +81,6 @@ router.post('/toggle-service', authenticate, botAuth, requireRole('admin'), asyn
 
 
 
-const botAuth = (req, res, next) => {
-    const authHeader = req.headers.authorization;
-    const token = authHeader && authHeader.split(' ')[1];
-    if (token !== process.env.BOT_API_KEY) {
-        return res.status(401).json({ success: false, error: 'No autorizado' });
-    }
-    next();
-};
 
 
 
