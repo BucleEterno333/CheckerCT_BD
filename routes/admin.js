@@ -8,21 +8,6 @@ const SERVICE_API_KEY = process.env.SERVICE_API_KEY;
 const BOT_API_KEY = process.env.BOT_API_KEY;
 
 
-// Todas las rutas requieren autenticación
-router.use(authenticate);
-
-
-// ========== ENDPOINTS PARA EL INTERRUPTOR ==========
-
-// 1. Consultar estado actual (cualquier usuario autenticado puede verlo, pero no modificar)
-router.get('/service-status', authenticate, async (req, res) => {
-    try {
-        const enabled = await getSetting('cookie_generator_enabled', true);
-        res.json({ success: true, enabled });
-    } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
 
 // routes/admin.js - agregar este endpoint
 
@@ -42,14 +27,37 @@ router.post('/bot/toggle-service', async (req, res) => {
     }
 });
 
-const botAuth = (req, res, next) => {
-    const authHeader = req.headers.authorization;
-    const token = authHeader && authHeader.split(' ')[1];
-    if (token !== process.env.BOT_API_KEY) {
+
+// 3. Endpoint para que el generador consulte el estado (con API key, sin autenticación JWT)
+router.get('/service-status-for-generator', async (req, res) => {
+    const apiKey = req.headers['x-api-key'];
+    if (apiKey !== SERVICE_API_KEY) {
         return res.status(401).json({ success: false, error: 'No autorizado' });
     }
-    next();
-};
+    const enabled = await getSetting('cookie_generator_enabled', true);
+    res.json({ success: true, enabled });
+});
+
+
+
+
+
+// Todas las rutas requieren autenticación
+router.use(authenticate);
+
+
+// ========== ENDPOINTS PARA EL INTERRUPTOR ==========
+
+// 1. Consultar estado actual (cualquier usuario autenticado puede verlo, pero no modificar)
+router.get('/service-status', authenticate, async (req, res) => {
+    try {
+        const enabled = await getSetting('cookie_generator_enabled', true);
+        res.json({ success: true, enabled });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
 
 // 2. Cambiar estado (solo admin)
 router.post('/toggle-service', authenticate, botAuth, requireRole('admin'), async (req, res) => {
@@ -63,15 +71,17 @@ router.post('/toggle-service', authenticate, botAuth, requireRole('admin'), asyn
     }
 });
 
-// 3. Endpoint para que el generador consulte el estado (con API key, sin autenticación JWT)
-router.get('/service-status-for-generator', async (req, res) => {
-    const apiKey = req.headers['x-api-key'];
-    if (apiKey !== SERVICE_API_KEY) {
+
+
+const botAuth = (req, res, next) => {
+    const authHeader = req.headers.authorization;
+    const token = authHeader && authHeader.split(' ')[1];
+    if (token !== process.env.BOT_API_KEY) {
         return res.status(401).json({ success: false, error: 'No autorizado' });
     }
-    const enabled = await getSetting('cookie_generator_enabled', true);
-    res.json({ success: true, enabled });
-});
+    next();
+};
+
 
 
 
