@@ -21,7 +21,7 @@ router.post('/bot/use-credits', async (req, res) => {
     try {
         await client.query('BEGIN');
         const userRes = await client.query(
-            'SELECT id, credits FROM users WHERE telegram_id = $1 FOR UPDATE',
+            'SELECT id, credits, role FROM users WHERE telegram_id = $1 FOR UPDATE',
             [telegram_id]
         );
         if (userRes.rows.length === 0) {
@@ -29,6 +29,7 @@ router.post('/bot/use-credits', async (req, res) => {
         }
         const userId = userRes.rows[0].id;
         const currentCredits = userRes.rows[0].credits;
+        const role = userRes.rows[0].role;
         if (currentCredits < amountToUse) {
             throw new Error('Créditos insuficientes');
         }
@@ -41,7 +42,7 @@ router.post('/bot/use-credits', async (req, res) => {
             [userId, amountToUse, currentCredits, newCredits, 'Generación desde bot']
         );
         await client.query('COMMIT');
-        res.json({ success: true, newCredits });
+        res.json({ success: true, newCredits, role });  // ← agregamos role
     } catch (error) {
         await client.query('ROLLBACK');
         console.error('Error en /bot/use-credits:', error);
@@ -73,13 +74,18 @@ router.post('/bot/check-credits', async (req, res) => {
 router.use(authenticate);
 
 // Obtener créditos del usuario autenticado
+// Obtener créditos y rol del usuario autenticado
 router.get('/credits', async (req, res) => {
     try {
-        const result = await pool.query('SELECT credits FROM users WHERE id = $1', [req.user.id]);
+        const result = await pool.query(
+            'SELECT credits, role FROM users WHERE id = $1',
+            [req.user.id]
+        );
         if (result.rows.length === 0) {
             return res.status(404).json({ success: false, error: 'Usuario no encontrado' });
         }
-        res.json({ success: true, credits: result.rows[0].credits });
+        const { credits, role } = result.rows[0];
+        res.json({ success: true, credits, role });
     } catch (error) {
         console.error('Error obteniendo créditos:', error);
         res.status(500).json({ success: false, error: error.message });

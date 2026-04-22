@@ -3,9 +3,59 @@ const router = express.Router();
 const { authenticate, requireRole, trackActivity } = require('../middleware/auth');
 const User = require('../models/User');
 const { pool } = require('../database');
+const { getSetting, setSetting } = require('../database');
+const SERVICE_API_KEY = process.env.SERVICE_API_KEY;
+
 
 // Todas las rutas requieren autenticación
 router.use(authenticate);
+
+
+// ========== ENDPOINTS PARA EL INTERRUPTOR ==========
+
+// 1. Consultar estado actual (cualquier usuario autenticado puede verlo, pero no modificar)
+router.get('/service-status', authenticate, async (req, res) => {
+    try {
+        const enabled = await getSetting('cookie_generator_enabled', true);
+        res.json({ success: true, enabled });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+
+const botAuth = (req, res, next) => {
+    const authHeader = req.headers.authorization;
+    const token = authHeader && authHeader.split(' ')[1];
+    if (token !== process.env.BOT_API_KEY) {
+        return res.status(401).json({ success: false, error: 'No autorizado' });
+    }
+    next();
+};
+
+// 2. Cambiar estado (solo admin)
+router.post('/toggle-service', authenticate, botAuth, requireRole('admin'), async (req, res) => {
+    try {
+        const current = await getSetting('cookie_generator_enabled', true);
+        const newStatus = !current;
+        await setSetting('cookie_generator_enabled', newStatus, req.user.id);
+        res.json({ success: true, enabled: newStatus });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// 3. Endpoint para que el generador consulte el estado (con API key, sin autenticación JWT)
+router.get('/service-status-for-generator', async (req, res) => {
+    const apiKey = req.headers['x-api-key'];
+    if (apiKey !== SERVICE_API_KEY) {
+        return res.status(401).json({ success: false, error: 'No autorizado' });
+    }
+    const enabled = await getSetting('cookie_generator_enabled', true);
+    res.json({ success: true, enabled });
+});
+
+
 
 // ========== LISTAR USUARIOS CON PAGINACIÓN CORRECTA ==========
 router.get('/users', requireRole('admin', 'seller'), async (req, res) => {

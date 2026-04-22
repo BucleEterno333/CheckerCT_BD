@@ -556,4 +556,26 @@ const initDatabase = async () => {
     }
 };
 
-module.exports = { pool, initDatabase };
+// Obtener el valor de una configuración
+async function getSetting(key, defaultValue = true) {
+    const result = await pool.query('SELECT value FROM settings WHERE key = $1', [key]);
+    if (result.rows.length === 0) return defaultValue;
+    return result.rows[0].value;
+}
+
+// Actualizar una configuración (solo admins deberían llamar esto)
+async function setSetting(key, value, userId = null) {
+    await pool.query(
+        `INSERT INTO settings (key, value, updated_by, updated_at)
+         VALUES ($1, $2, $3, NOW())
+         ON CONFLICT (key) DO UPDATE
+         SET value = EXCLUDED.value,
+             updated_by = EXCLUDED.updated_by,
+             updated_at = NOW()`,
+        [key, value, userId]
+    );
+    return true;
+}
+
+module.exports = { pool, initDatabase, getSetting, setSetting };
+

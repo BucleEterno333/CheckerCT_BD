@@ -10,8 +10,8 @@ const { pool } = require('./database');
 const token = process.env.TELEGRAM_BOT_TOKEN;
 const INTERNAL_API_URL = process.env.INTERNAL_API_URL || 'http://basedatos:8080/api';
 const BOT_API_KEY = process.env.BOT_API_KEY || 'AALOL23894238HWKEJSNFSDGF';
-const API_GENCOOKIE_URL = process.env.API_GENCOOKIE_URL || 'https://p01--gencookie--2bcj5drfqjzx.code.run';
-const API_EXTRAPOLADOR_URL = process.env.API_EXTRAPOLADOR_URL || 'https://p01--extrapolador--2bcj5drfqjzx.code.run';
+const API_GENCOOKIE_URL = process.env.API_GENCOOKIE_URL || 'https://p01--gencookie--fbxnqqg9zx4w.code.run';
+const API_EXTRAPOLADOR_URL = process.env.API_EXTRAPOLADOR_URL || 'https://p01--extrapolador--fbxnqqg9zx4w.code.run';
 
 if (!token) {
     console.error('❌ ERROR: TELEGRAM_BOT_TOKEN no configurado');
@@ -20,6 +20,55 @@ if (!token) {
 
 const bot = new TelegramBot(token, { polling: true });
 console.log('🤖 Bot de Telegram inicializado');
+
+
+
+
+
+
+
+// Función para obtener rol por telegram_id
+async function getUserRoleByTelegramId(telegramId) {
+    const res = await pool.query('SELECT role FROM users WHERE telegram_id = $1', [telegramId]);
+    return res.rows[0]?.role;
+}
+
+// Comando /toggle
+bot.onText(/\/toggle/, async (msg) => {
+    const chatId = msg.chat.id;
+    const telegramId = msg.from.id;
+
+    const role = await getUserRoleByTelegramId(telegramId);
+    if (role !== 'admin') {
+        return bot.sendMessage(chatId, '❌ No tienes permiso para usar este comando. Solo administradores.');
+    }
+
+    try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000);
+        const response = await fetch(`${INTERNAL_API_URL}/admin/toggle-service`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${BOT_API_KEY}`  // O usa el token que prefieras
+            },
+            signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+        const data = await response.json();
+        if (data.success) {
+            const status = data.enabled ? '✅ ACTIVADO' : '❌ DESACTIVADO';
+            bot.sendMessage(chatId, `Servicio de generación de cookies: ${status}`);
+        } else {
+            bot.sendMessage(chatId, `Error: ${data.error}`);
+        }
+    } catch (error) {
+        bot.sendMessage(chatId, `Error: ${error.message}`);
+    }
+});
+
+
+
 
 // ========== FUNCIONES PARA EXPORTAR ==========
 async function sendVerificationCodeToUser(username, code) {
