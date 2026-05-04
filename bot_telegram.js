@@ -416,6 +416,28 @@ bot.onText(/^\/gencookie(?:\s+(\w+))?/i, async (msg, match) => {
     }
 });
 
+
+// Comando /web - Muestra el enlace a la página web
+bot.onText(/\/web/, async (msg) => {
+    const chatId = msg.chat.id;
+    await bot.sendMessage(
+        chatId,
+        `🌐 *Accede a nuestra web oficial:*\n\n🔗 https://ciberterroristaschk.shop/\n\nDesde allí puedes gestionar tus lives, cuentas y más.`,
+        { parse_mode: 'Markdown', disable_web_page_preview: true }
+    );
+});
+
+// Comando /bot - Muestra el enlace al nuevo bot
+bot.onText(/\/bot/, async (msg) => {
+    const chatId = msg.chat.id;
+    await bot.sendMessage(
+        chatId,
+        `🤖 *Nuestro nuevo bot oficial:*\n\n👉 @AstralCHK_Bot\n\nÚsalo para generar cookies, verificar tarjetas y más. No olvides enviar /start.`,
+        { parse_mode: 'Markdown', disable_web_page_preview: true }
+    );
+});
+
+
 // /extrapolador - permite BIN en el comando o interactivo
 bot.onText(/\/extrapolador(?:\s+(\d{6}))?/, async (msg, match) => {
     const chatId = msg.chat.id;

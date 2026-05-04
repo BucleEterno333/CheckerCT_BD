@@ -3,13 +3,13 @@ require('dotenv').config();
 const { pool } = require('./database');
 const TelegramBot = require('node-telegram-bot-api');
 
-const OLD_BOT_TOKEN = process.env.OLD_BOT_TOKEN;
-if (!OLD_BOT_TOKEN) {
-    console.error('❌ Falta OLD_BOT_TOKEN en .env');
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+if (!TELEGRAM_BOT_TOKEN) {
+    console.error('❌ Falta TELEGRAM_BOT_TOKEN en .env');
     process.exit(1);
 }
 
-const bot = new TelegramBot(OLD_BOT_TOKEN, { polling: false });
+const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: false });
 
 const MENSAJE = `⚠️ AVISO IMPORTANTE
 
