@@ -174,26 +174,80 @@ async function getUserByTelegramId(telegramId) {
 
 async function upsertUser(telegramId, username, chatId, chatType) {
     const now = new Date();
-    let user = await pool.query('SELECT id, username FROM users WHERE telegram_id = $1', [telegramId]);
-    if (user.rows.length > 0) {
-        if (chatType === 'private') {
-            await pool.query('UPDATE users SET telegram_chat_id = $1, updated_at = $2 WHERE telegram_id = $3', [chatId, now, telegramId]);
-        }
-        return;
-    }
-    user = await pool.query('SELECT id, username FROM users WHERE username = $1', [username]);
-    if (user.rows.length > 0) {
-        if (chatType === 'private') {
-            await pool.query('UPDATE users SET telegram_id = $1, telegram_chat_id = $2, telegram_username = $3, updated_at = $4 WHERE username = $5', [telegramId, chatId, username, now, username]);
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+
+        // 1. Si otro usuario tiene este chat_id, se lo quitamos (lo dejamos NULL)
+        await client.query(
+            `UPDATE users 
+             SET telegram_chat_id = NULL 
+             WHERE telegram_chat_id = $1 AND telegram_id != $2`,
+            [chatId, telegramId]
+        );
+
+        // 2. Buscar si ya existe el usuario por telegram_id
+        const userByTelegram = await client.query(
+            'SELECT id, username FROM users WHERE telegram_id = $1',
+            [telegramId]
+        );
+
+        if (userByTelegram.rows.length > 0) {
+            // Ya existe -> actualizar (solo si es chat privado)
+            if (chatType === 'private') {
+                await client.query(
+                    'UPDATE users SET telegram_chat_id = $1, updated_at = $2 WHERE telegram_id = $3',
+                    [chatId, now, telegramId]
+                );
+            }
         } else {
-            await pool.query('UPDATE users SET telegram_id = $1, telegram_username = $2, updated_at = $3 WHERE username = $4', [telegramId, username, now, username]);
+            // No existe por telegram_id -> buscar por username
+            const userByUsername = await client.query(
+                'SELECT id, username FROM users WHERE username = $1',
+                [username]
+            );
+            if (userByUsername.rows.length > 0) {
+                // Existe por username -> actualizar con los datos de Telegram
+                if (chatType === 'private') {
+                    await client.query(
+                        `UPDATE users 
+                         SET telegram_id = $1, telegram_chat_id = $2, telegram_username = $3, updated_at = $4 
+                         WHERE username = $5`,
+                        [telegramId, chatId, username, now, username]
+                    );
+                } else {
+                    await client.query(
+                        `UPDATE users 
+                         SET telegram_id = $1, telegram_username = $2, updated_at = $3 
+                         WHERE username = $4`,
+                        [telegramId, username, now, username]
+                    );
+                }
+            } else {
+                // No existe ni por telegram_id ni por username -> crear nuevo
+                if (chatType === 'private') {
+                    await client.query(
+                        `INSERT INTO users (telegram_id, telegram_username, telegram_chat_id, username, created_at) 
+                         VALUES ($1, $2, $3, $4, $5)`,
+                        [telegramId, username, chatId, username, now]
+                    );
+                } else {
+                    await client.query(
+                        `INSERT INTO users (telegram_id, telegram_username, username, created_at) 
+                         VALUES ($1, $2, $3, $4)`,
+                        [telegramId, username, username, now]
+                    );
+                }
+            }
         }
-        return;
-    }
-    if (chatType === 'private') {
-        await pool.query(`INSERT INTO users (telegram_id, telegram_username, telegram_chat_id, username, created_at) VALUES ($1, $2, $3, $4, $5)`, [telegramId, username, chatId, username, now]);
-    } else {
-        await pool.query(`INSERT INTO users (telegram_id, telegram_username, username, created_at) VALUES ($1, $2, $3, $4)`, [telegramId, username, username, now]);
+
+        await client.query('COMMIT');
+    } catch (error) {
+        await client.query('ROLLBACK');
+        console.error('Error en upsertUser:', error);
+        throw error;
+    } finally {
+        client.release();
     }
 }
 

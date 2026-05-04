@@ -154,14 +154,6 @@ cron.schedule('1 0 * * *', async () => {
     timezone: "America/Mexico_City"
 });
 
-// Temporal: ejecutar una vez al inicio para probar
-(async () => {
-    const client = await pool.connect();
-    const result = await client.query('UPDATE users SET days_remaining = days_remaining - 1 WHERE days_remaining > 0 RETURNING id, days_remaining');
-    console.log('Prueba manual:', result.rowCount);
-    client.release();
-})();
-
 console.log('⏰ Tarea programada: restar 1 día a las 12:01 AM (hora CDMX)');
 
 startServer();
