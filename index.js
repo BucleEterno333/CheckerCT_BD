@@ -6,7 +6,7 @@ const { pool, initDatabase } = require('./database');
 const app = express();
 const PORT = process.env.PORT || 8080; 
 const cron = require('node-cron');
-const { sendSafeMessage } = require('../bot_telegram');
+const { sendSafeMessage } = require('./bot_telegram');
 
 
 // 1. CORS

@@ -10,7 +10,7 @@ if (!TELEGRAM_BOT_TOKEN) {
 }
 
 const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: false });
-const { sendSafeMessage } = require('../bot_telegram');
+const { sendSafeMessage } = require('./bot_telegram');
 
 
 
