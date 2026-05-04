@@ -6,6 +6,8 @@ const { pool, initDatabase } = require('./database');
 const app = express();
 const PORT = process.env.PORT || 8080; 
 const cron = require('node-cron');
+const { sendSafeMessage } = require('../bot_telegram');
+
 
 // 1. CORS
 app.use(cors({
@@ -70,7 +72,6 @@ app.use('/api/user-accounts', userAccountsRoutes);
 app.use('/api/user-responses', userResponsesRoutes);
 
 
-
 // Inicializar servidor
 const startServer = async () => {
     try {
@@ -129,7 +130,7 @@ cron.schedule('1 0 * * *', async () => {
                             await bot.telegram.kickChatMember(GROUP_CHAT_ID, telegramId);
                             console.log(`✅ Usuario ${user.username} (${telegramId}) expulsado por días 0`);
                             // Opcional: enviar mensaje privado
-                            await bot.sendMessage(telegramId, '❌ Tus días han expirado. Has sido expulsado del grupo. Contacta al admin para renovar.');
+                            await sendSafeMessage(telegramId, '❌ Tus días han expirado. Has sido expulsado del grupo. Contacta al admin para renovar.');
                         } catch (err) {
                             console.error(`Error expulsando a ${telegramId}:`, err.message);
                         }

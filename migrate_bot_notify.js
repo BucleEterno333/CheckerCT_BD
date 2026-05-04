@@ -10,6 +10,10 @@ if (!TELEGRAM_BOT_TOKEN) {
 }
 
 const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: false });
+const { sendSafeMessage } = require('../bot_telegram');
+
+
+
 
 const MENSAJE = `⚠️ AVISO IMPORTANTE
 
@@ -40,7 +44,7 @@ async function sendNotificationToAllUsers() {
         for (const user of res.rows) {
             try {
                 // Enviar SIN parse_mode (texto plano)
-                await bot.sendMessage(user.telegram_chat_id, MENSAJE, { disable_web_page_preview: true });
+                await sendSafeMessage(user.telegram_chat_id, MENSAJE, { disable_web_page_preview: true });
                 console.log(`✅ Mensaje enviado a ${user.username} (${user.telegram_chat_id})`);
                 success++;
                 await new Promise(resolve => setTimeout(resolve, 100));

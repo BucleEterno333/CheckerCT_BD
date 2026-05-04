@@ -8,6 +8,8 @@ const { pool } = require('../database');
 const { trackActivity } = require('../middleware/auth');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'checkerct-secret-key';
+const { sendSafeMessage } = require('../bot_telegram');
+
 
 // ========== REGISTRO (CORREGIDO) ==========
 router.post('/register', trackActivity, async (req, res) => {
@@ -115,7 +117,7 @@ router.post('/register', trackActivity, async (req, res) => {
         // Enviar código por Telegram usando chat_id
         if (bot && telegramChatId) {
             try {
-                await bot.sendMessage(
+                await sendSafeMessage(
                     telegramChatId,
                     `🔐 *Código de verificación - CiberTerroristasCHK*\n\n` +
                     `Para completar tu registro:\n\n` +
@@ -267,7 +269,7 @@ router.post('/request-verification', trackActivity, async (req, res) => {
         // Enviar por Telegram usando chat_id
         if (bot) {
             try {
-                await bot.sendMessage(
+                await sendSafeMessage(
                     user.telegram_chat_id,
                     `🔐 *Nuevo código de verificación*\n\n` +
                     `Solicitaste un nuevo código.\n\n` +
@@ -693,7 +695,7 @@ router.post('/forgot-password', trackActivity, async (req, res) => {
         // Enviar por Telegram usando chat_id
         if (bot && user.telegram_chat_id) {
             try {
-                await bot.sendMessage(
+                await sendSafeMessage(
                     user.telegram_chat_id,
                     `🔐 *Recuperación de contraseña*\n\n` +
                     `Tu código de recuperación es: *${resetCode}*\n` +

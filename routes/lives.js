@@ -7,6 +7,7 @@ const Account = require('../models/UserAccount');
 const Contact = require('../models/Contact');
 const { bot } = require('../bot_telegram'); // si quieres notificar
 const { pool } = require('../database');
+const { sendSafeMessage } = require('../bot_telegram');
 
 router.use(authenticate);
 
@@ -251,7 +252,7 @@ router.post('/:liveId/transfer', async (req, res) => {
         const receiverUser = await pool.query('SELECT telegram_chat_id FROM users WHERE id = $1', [transferResult.toUserId]);
         if (receiverUser.rows[0]?.telegram_chat_id && bot) {
             const card = await pool.query('SELECT card_last_four, gate_name FROM user_lives WHERE id = $1', [liveId]);
-            await bot.sendMessage(
+            await sendSafeMessage(
                 receiverUser.rows[0].telegram_chat_id,
                 `🔔 *Te han transferido una tarjeta*\n\n` +
                 `📌 Terminación: ${card.rows[0].card_last_four}\n` +
