@@ -173,71 +173,59 @@ async function getUserByTelegramId(telegramId) {
 }
 
 async function upsertUser(telegramId, username, chatId, chatType) {
+    if (chatType !== 'private') return; // Solo en chats privados
+
     const now = new Date();
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
 
-        // 1. Si otro usuario tiene este chat_id, se lo quitamos (lo dejamos NULL)
+        // 1. Eliminar el chat_id de cualquier otro usuario (incluyendo posibles duplicados)
         await client.query(
-            `UPDATE users 
-             SET telegram_chat_id = NULL 
-             WHERE telegram_chat_id = $1 AND telegram_id != $2`,
-            [chatId, telegramId]
+            `UPDATE users SET telegram_chat_id = NULL WHERE telegram_chat_id = $1`,
+            [chatId]
         );
 
-        // 2. Buscar si ya existe el usuario por telegram_id
-        const userByTelegram = await client.query(
-            'SELECT id, username FROM users WHERE telegram_id = $1',
+        // 2. Buscar si el usuario ya existe por telegram_id
+        const existing = await client.query(
+            'SELECT id FROM users WHERE telegram_id = $1',
             [telegramId]
         );
 
-        if (userByTelegram.rows.length > 0) {
-            // Ya existe -> actualizar (solo si es chat privado)
-            if (chatType === 'private') {
-                await client.query(
-                    'UPDATE users SET telegram_chat_id = $1, updated_at = $2 WHERE telegram_id = $3',
-                    [chatId, now, telegramId]
-                );
-            }
+        if (existing.rows.length > 0) {
+            // Actualizar el registro existente
+            await client.query(
+                `UPDATE users 
+                 SET telegram_chat_id = $1, 
+                     telegram_username = $2,
+                     updated_at = $3
+                 WHERE telegram_id = $4`,
+                [chatId, username, now, telegramId]
+            );
         } else {
-            // No existe por telegram_id -> buscar por username
-            const userByUsername = await client.query(
-                'SELECT id, username FROM users WHERE username = $1',
+            // Buscar por username (posiblemente se registró por web sin telegram)
+            const byUsername = await client.query(
+                'SELECT id FROM users WHERE username = $1',
                 [username]
             );
-            if (userByUsername.rows.length > 0) {
-                // Existe por username -> actualizar con los datos de Telegram
-                if (chatType === 'private') {
-                    await client.query(
-                        `UPDATE users 
-                         SET telegram_id = $1, telegram_chat_id = $2, telegram_username = $3, updated_at = $4 
-                         WHERE username = $5`,
-                        [telegramId, chatId, username, now, username]
-                    );
-                } else {
-                    await client.query(
-                        `UPDATE users 
-                         SET telegram_id = $1, telegram_username = $2, updated_at = $3 
-                         WHERE username = $4`,
-                        [telegramId, username, now, username]
-                    );
-                }
+            if (byUsername.rows.length > 0) {
+                await client.query(
+                    `UPDATE users 
+                     SET telegram_id = $1,
+                         telegram_chat_id = $2,
+                         telegram_username = $3,
+                         updated_at = $4
+                     WHERE username = $5`,
+                    [telegramId, chatId, username, now, username]
+                );
             } else {
-                // No existe ni por telegram_id ni por username -> crear nuevo
-                if (chatType === 'private') {
-                    await client.query(
-                        `INSERT INTO users (telegram_id, telegram_username, telegram_chat_id, username, created_at) 
-                         VALUES ($1, $2, $3, $4, $5)`,
-                        [telegramId, username, chatId, username, now]
-                    );
-                } else {
-                    await client.query(
-                        `INSERT INTO users (telegram_id, telegram_username, username, created_at) 
-                         VALUES ($1, $2, $3, $4)`,
-                        [telegramId, username, username, now]
-                    );
-                }
+                // Crear nuevo usuario
+                await client.query(
+                    `INSERT INTO users 
+                     (telegram_id, telegram_username, telegram_chat_id, username, created_at)
+                     VALUES ($1, $2, $3, $4, $5)`,
+                    [telegramId, username, chatId, username, now]
+                );
             }
         }
 
@@ -245,12 +233,11 @@ async function upsertUser(telegramId, username, chatId, chatType) {
     } catch (error) {
         await client.query('ROLLBACK');
         console.error('Error en upsertUser:', error);
-        throw error;
+        // No relanzamos el error para que el bot no crashee
     } finally {
         client.release();
     }
 }
-
 async function deductCredits(telegramId, amount = 4) {
     try {
         const controller = new AbortController();
