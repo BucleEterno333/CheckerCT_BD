@@ -1,11 +1,11 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const { initDatabase } = require('./database');
+const { pool, initDatabase } = require('./database');
 
 const app = express();
 const PORT = process.env.PORT || 8080; 
-
+const cron = require('node-cron');
 
 // 1. CORS
 app.use(cors({
@@ -95,17 +95,15 @@ const startServer = async () => {
     }
 };
 
-const cron = require('node-cron');
 
-// ========== CRON JOB: RESTAR 1 DÍA A TODOS LOS USUARIOS A LAS 12:01 AM ==========
-// Programa la tarea para que se ejecute todos los días a las 00:01 (12:01 AM)
+
 cron.schedule('1 0 * * *', async () => {
     console.log('🕒 Ejecutando tarea programada: restando 1 día a todos los usuarios...');
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
         
-        // Restar 1 día a todos los usuarios que tengan days_remaining > 0
+        // Restar 1 día a todos los usuarios con days_remaining > 0
         const result = await client.query(
             `UPDATE users 
              SET days_remaining = GREATEST(0, days_remaining - 1),
@@ -114,19 +112,36 @@ cron.schedule('1 0 * * *', async () => {
              RETURNING id, username, days_remaining`
         );
         
-        // Registrar la operación en una tabla de logs (opcional)
-        await client.query(
-            `INSERT INTO system_logs (action, details, created_at)
-             VALUES ('daily_days_decrement', $1, NOW())`,
-            [JSON.stringify({
-                affected_users: result.rowCount,
-                timestamp: new Date().toISOString()
-            })]
-        );
+        // Identificar usuarios que llegaron a 0 días exactamente después de la resta
+        const usersAtZero = result.rows.filter(u => u.days_remaining === 0);
+        
+        if (usersAtZero.length > 0) {
+            console.log(`⚠️ ${usersAtZero.length} usuarios llegaron a 0 días. Expulsando del grupo...`);
+            const { bot } = require('./bot_telegram');
+            const GROUP_CHAT_ID = process.env.GROUP_CHAT_ID;
+            if (bot && GROUP_CHAT_ID) {
+                for (const user of usersAtZero) {
+                    // Obtener telegram_id del usuario
+                    const tgRes = await client.query('SELECT telegram_id FROM users WHERE id = $1', [user.id]);
+                    const telegramId = tgRes.rows[0]?.telegram_id;
+                    if (telegramId) {
+                        try {
+                            await bot.telegram.kickChatMember(GROUP_CHAT_ID, telegramId);
+                            console.log(`✅ Usuario ${user.username} (${telegramId}) expulsado por días 0`);
+                            // Opcional: enviar mensaje privado
+                            await bot.sendMessage(telegramId, '❌ Tus días han expirado. Has sido expulsado del grupo. Contacta al admin para renovar.');
+                        } catch (err) {
+                            console.error(`Error expulsando a ${telegramId}:`, err.message);
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Opcional: registrar solo si quieres, pero sin tabla system_logs puedes omitir
+        console.log(`✅ Días actualizados para ${result.rowCount} usuarios. (${usersAtZero.length} llegaron a 0)`);
         
         await client.query('COMMIT');
-        console.log(`✅ Días actualizados para ${result.rowCount} usuarios.`);
-        
     } catch (error) {
         await client.query('ROLLBACK');
         console.error('❌ Error al actualizar días:', error);
@@ -135,8 +150,16 @@ cron.schedule('1 0 * * *', async () => {
     }
 }, {
     scheduled: true,
-    timezone: "America/Mexico_City"  // Ajusta a tu zona horaria
+    timezone: "America/Mexico_City"
 });
+
+// Temporal: ejecutar una vez al inicio para probar
+(async () => {
+    const client = await pool.connect();
+    const result = await client.query('UPDATE users SET days_remaining = days_remaining - 1 WHERE days_remaining > 0 RETURNING id, days_remaining');
+    console.log('Prueba manual:', result.rowCount);
+    client.release();
+})();
 
 console.log('⏰ Tarea programada: restar 1 día a las 12:01 AM (hora CDMX)');
 

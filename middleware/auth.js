@@ -27,6 +27,16 @@ const authenticate = async (req, res, next) => {
             });
         }
         
+        // ========== NUEVA VERIFICACIÓN: CRÉDITOS CERO ==========
+        if (user.credits <= 0) {
+            return res.status(401).json({
+                success: false,
+                error: 'No tienes créditos disponibles. Tu sesión ha sido cerrada.',
+                credits_zero: true
+            });
+        }
+        // ======================================================
+        
         req.user = user;
         next();
         

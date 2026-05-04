@@ -21,9 +21,43 @@ if (!token) {
 const bot = new TelegramBot(token, { polling: true });
 console.log('🤖 Bot de Telegram inicializado');
 
+const GROUP_CHAT_ID = process.env.GROUP_CHAT_ID; // Ejemplo: -1001234567890
+if (!GROUP_CHAT_ID) {
+    console.warn('⚠️ GROUP_CHAT_ID no configurado. No se expulsará a nadie.');
+}
+
 // Mapa para rastrear usuarios en proceso de generación
 const processingUsers = new Map();
 
+async function kickUserFromGroup(telegramUserId) {
+    if (!GROUP_CHAT_ID) return false;
+    try {
+        await bot.telegram.kickChatMember(GROUP_CHAT_ID, telegramUserId);
+        console.log(`✅ Usuario ${telegramUserId} expulsado del grupo por créditos 0`);
+        return true;
+    } catch (error) {
+        console.error(`❌ Error expulsando a ${telegramUserId}:`, error.description || error.message);
+        return false;
+    }
+}
+
+async function checkAndKickIfNoDaysOrCredits(telegramId, chatId, requiredCredits = 0) {
+    const user = await getUserByTelegramId(telegramId);
+    if (!user) {
+        await bot.sendMessage(chatId, '❌ Usa /start primero.');
+        return false;
+    }
+    if (user.days_remaining <= 0) {
+        await kickUserFromGroup(telegramId);
+        await bot.sendMessage(chatId, '❌ Tus días han expirado. Has sido expulsado del grupo. Contacta al admin para renovar.');
+        return false;
+    }
+    if (requiredCredits > 0 && user.credits < requiredCredits) {
+        await bot.sendMessage(chatId, `❌ Créditos insuficientes. Necesitas: (${requiredCredits}).`);
+        return false;
+    }
+    return true;
+}
 
 // Función para limpiar el estado después de un tiempo (seguridad)
 function scheduleCleanup(telegramId, timeoutMs = 300000) { // 5 minutos máximo
@@ -154,13 +188,16 @@ async function deductCredits(telegramId, amount = 4) {
         });
         clearTimeout(timeoutId);
         const data = await response.json();
-        return data.success ? data.newCredits : null;
+        if (data.success) {
+            return { newCredits: data.newCredits, creditsZero: data.credits_zero || false, role: data.role };
+        } else {
+            return null;
+        }
     } catch (error) {
         console.error('Error en deductCredits:', error);
         return null;
     }
 }
-
 function limpiarTarjetas(textoSucio) {
     const textoLimpio = textoSucio
         .replace(/\u200b/g, '')
@@ -258,24 +295,24 @@ bot.onText(/\/start/, async (msg) => {
             const mensaje = 
                 `👋 ¡Hola ${firstName}! 👋 \n\n` +
                 `He guardado tu Chat ID: <code>${telegramId}</code>\n\n` +
-                `Ahora puedes registrarte en la web siguiendo estos pasos:\n\n` +
+                `Ahora puedes registrarte en la web (y obtener una cookie gratis) siguiendo estos pasos:\n\n` +
                 `1. Ve a la página:\n\n` +
                 `                 ꧁⎝ 𓆩༺✧༻𓆪 ⎠꧂\n` +
-                `https://ciber7erroristaschk.com/login.html\n` +
+                `https://ciberterroristaschk.shop/login.html\n` +
                 `                 ꧁⎝ 𓆩༺✧༻𓆪 ⎠꧂ \n\n` +
                 `2. Usa tu usuario: @${username}\n\n` +
                 `3. Recibirás un código de verificación aquí. \n\n` +
-                `4. Escríbelo en la página web, y comienza a livear y shippear ahora. \n\n` +
+                `4. Escríbelo en la página web, obtén una cookie gratis y comienza a livear y shippear ahora. \n\n` +
                 `                 👾 ¡Te esperamos! 👾`;
             await bot.sendMessage(chatId, mensaje, { parse_mode: 'HTML' });
         } else {
             const servicios = 
                 `*Servicios activos:*\n` +
-                `• Amazon (/chk amazon + tarjetas) Solo en web\n` +
+                `• Amazon (/chk amazon + tarjetas)\n` +
                 `• Generador de cookies (/gencookie MX ✅)\n` +
                 `• Extrapolador (/extrapolador 557910) ✅\n` +
-                `• Generador de tarjetas (/gen patrón) ✅\n` +
-                `• Limpiador de texto (/limpiador) ✅\n`;
+                `• Generador de tarjetas (/gen 557910574828xxxx|12|2028|000) ✅\n` +
+                `• Limpiador de texto (/limpiador texto) ✅\n`;
             const mensaje = 
                 `👋 ¡Hola ${firstName}!\n\n` +
                 `💰 *Créditos:* ${existing.credits}\n` +
@@ -327,7 +364,7 @@ bot.onText(/^\/gencookie(?:\s+(\w+))?/i, async (msg, match) => {
         }
         const user = await getUserByTelegramId(telegramId);
         if (!user) return bot.sendMessage(chatId, '❌ Usa /start primero.');
-        if (user.credits < 4) return bot.sendMessage(chatId, '❌ Créditos insuficientes (4).');
+        if (!await checkAndKickIfNoDaysOrCredits(telegramId, chatId, 4)) return;
         await bot.sendMessage(chatId, `🔄 Generando cookie para ${country}... (puede tardar hasta 5 min)`);
         try {
             const controller = new AbortController();
@@ -345,17 +382,19 @@ bot.onText(/^\/gencookie(?:\s+(\w+))?/i, async (msg, match) => {
             try { data = JSON.parse(textResponse); } catch(e) { throw new Error('Respuesta no es JSON'); }
             if (!data.success || !data.data) throw new Error(data.error || 'Error del generador');
             const { phone, password, cookie_string, country: ctry } = data.data;
-            let newCredits = null;
-            try {
-                newCredits = await deductCredits(telegramId, 4);
-                if (newCredits === null) throw new Error('Fallo en descuento');
-                // Después de newCredits = await deductCredits(...)
-                if (newCredits !== null) {
-                    await incrementCookieCountBot(telegramId);
-                }
-            } catch(creditError) { console.error('Error descontando créditos:', creditError); }
+        let creditResult = null;
+        try {
+            creditResult = await deductCredits(telegramId, 4);
+            if (creditResult === null) throw new Error('Fallo en descuento');
+            if (creditResult.creditsZero) {
+                await kickUserFromGroup(telegramId);
+                await bot.sendMessage(chatId, '⚠️ Has llegado a 0 créditos. Has sido expulsado del grupo. Contacta al admin para recargar.');
+            }
+            await incrementCookieCountBot(telegramId);
+        } catch(creditError) { console.error('Error descontando créditos:', creditError); }
+
             let msgText = `🍪 *Cookie ${ctry}*\n📞 Teléfono: \`${phone}\`\n🔑 Pass: \`${password}\`\n🍪 Cookie:\n\`\`\`\n${cookie_string}\n\`\`\``;
-            msgText += (newCredits !== null) ? `\n💰 Créditos restantes: ${newCredits}` : `\n⚠️ No se pudieron actualizar tus créditos, pero la cookie es válida.`;
+            msgText += (creditResult !== null) ? `\n💰 Créditos restantes: ${creditResult.newCredits}` : `\n⚠️ No se pudieron actualizar tus créditos, pero la cookie es válida.`;
             await bot.sendMessage(chatId, msgText, { parse_mode: 'Markdown' });
             
         } catch(error) {
@@ -380,6 +419,8 @@ bot.onText(/^\/gencookie(?:\s+(\w+))?/i, async (msg, match) => {
 // /extrapolador - permite BIN en el comando o interactivo
 bot.onText(/\/extrapolador(?:\s+(\d{6}))?/, async (msg, match) => {
     const chatId = msg.chat.id;
+    if (!await checkAndKickIfNoDaysOrCredits(telegramId, chatId, 10)) return;
+
     let bin = match[1];
     if (!bin) {
         await bot.sendMessage(chatId, '🔢 Por favor, ingresa el BIN de 6 dígitos para extrapolar:');
@@ -464,6 +505,16 @@ bot.onText(/\/extrapolador(?:\s+(\d{6}))?/, async (msg, match) => {
         }
         if (mensaje.length > 4090) mensaje = mensaje.substring(0,4000) + "\n... (truncado)";
         await bot.sendMessage(chatId, mensaje, { parse_mode: 'Markdown' });
+        let creditResult = null;
+        try {
+            creditResult = await deductCredits(telegramId, 4);
+            if (creditResult === null) throw new Error('Fallo en descuento');
+            if (creditResult.creditsZero) {
+                await kickUserFromGroup(telegramId);
+                await bot.sendMessage(chatId, '⚠️ Has llegado a 0 créditos. Has sido expulsado del grupo. Contacta al admin para recargar.');
+            }
+            await incrementCookieCountBot(telegramId);
+        } catch(creditError) { console.error('Error descontando créditos:', creditError); }
     } catch(error) {
         console.error(error);
         bot.sendMessage(chatId, `❌ Error: ${error.message}`);
@@ -493,7 +544,7 @@ bot.onText(/^\/gen$/, async (msg) => {
 });
 
 // ========== COMANDO /gen con argumentos (patrón y opcional cantidad) ==========
-bot.onText(/^\/gen\s+([^\s|]+\|\d{2}\|\d{2,4})(?:\s+(\d+))?/, async (msg, match) => {
+bot.onText(/^\/gen\s+([0-9X]+\|\d{2}\|\d{2,4})(?:\s+(\d+))?/i, async (msg, match) => {
     const chatId = msg.chat.id;
     let patron = match[1];
     let cantidad = match[2] ? parseInt(match[2]) : 10;
@@ -574,7 +625,7 @@ bot.onText(/\/chk\s+amazon(?:\s+(.+))?/i, async (msg, match) => {
     // Verificar créditos primero
     const user = await getUserByTelegramId(telegramId);
     if (!user) return bot.sendMessage(chatId, '❌ Usa /start primero.');
-    if (user.credits < 1) return bot.sendMessage(chatId, '❌ Necesitas 1 crédito para verificar.');
+    if (!await checkAndKickIfNoDaysOrCredits(telegramId, chatId, 0)) return;
     // Pedir cookie
     await bot.sendMessage(chatId, '🔑 Por favor, envía la cookie de Amazon (puedes obtenerla con /gencookie).');
     const cookieResp = await new Promise(resolve => {
@@ -606,12 +657,10 @@ bot.onText(/\/chk\s+amazon(?:\s+(.+))?/i, async (msg, match) => {
     const tarjetas = limpiarTarjetas(rawText);
     if (tarjetas.length === 0) return bot.sendMessage(chatId, '❌ No se encontraron tarjetas válidas.');
     if (tarjetas.length > 20) return bot.sendMessage(chatId, `⚠️ Máximo 20 tarjetas (tienes ${tarjetas.length}).`);
-    // Descontar crédito
-    const newCredits = await deductCredits(telegramId, 1);
-    if (newCredits === null) return bot.sendMessage(chatId, '❌ Error al descontar créditos.');
+   
     await bot.sendMessage(chatId, `🔍 Verificando ${tarjetas.length} tarjetas...`);
     const resultados = await verificarTarjetasAmazon(tarjetas, cookies);
-    let resumen = `📊 *Resultados* (Créditos restantes: ${newCredits})\n\n`;
+    let resumen = `📊 *Resultados*\n\n`;
     for (const r of resultados) {
         const emoji = r.status === 'LIVE' ? '✅' : (r.status === 'DEAD' ? '❌' : '⚠️');
         resumen += `${emoji} \`${r.card}\` → ${r.status}\n${r.message ? `   ${r.message}\n` : ''}`;

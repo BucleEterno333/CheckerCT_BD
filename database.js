@@ -29,7 +29,7 @@ const initDatabase = async () => {
                 verified_at TIMESTAMP,
                 password_hash VARCHAR(255) NOT NULL,
                 display_name VARCHAR(100),
-                credits INTEGER DEFAULT 20,
+                credits INTEGER DEFAULT 4,
                 days_remaining INTEGER DEFAULT 7,
                 role VARCHAR(20) DEFAULT 'user' CHECK (role IN ('admin', 'seller', 'user')),
                 total_checks INTEGER DEFAULT 0,

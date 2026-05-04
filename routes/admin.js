@@ -18,6 +18,19 @@ const botAuth = (req, res, next) => {
     next();
 };
 
+async function kickUserFromGroupByUserId(userId) {
+    const { bot } = require('../bot_telegram');
+    const GROUP_CHAT_ID = process.env.GROUP_CHAT_ID;
+    if (!bot || !GROUP_CHAT_ID) return;
+    const res = await pool.query('SELECT telegram_id FROM users WHERE id = $1', [userId]);
+    const telegramId = res.rows[0]?.telegram_id;
+    if (telegramId) {
+        try {
+            await bot.telegram.kickChatMember(GROUP_CHAT_ID, telegramId);
+            console.log(`Usuario ${telegramId} expulsado por cero créditos/días desde admin`);
+        } catch (e) { console.error(e); }
+    }
+}
 
 router.post('/bot/toggle-service', async (req, res) => {
     // Verificar la clave del bot (puede venir en header x-bot-key o Authorization)
@@ -88,7 +101,7 @@ router.post('/toggle-service', authenticate, botAuth, requireRole('admin'), asyn
 // ========== LISTAR USUARIOS CON PAGINACIÓN CORRECTA ==========
 router.get('/users', requireRole('admin', 'seller'), async (req, res) => {
     try {
-        const { role, page = 1, limit = 20, search = '' } = req.query;
+        const { role, page = 1, limit = 200, search = '' } = req.query;
         const offset = (parseInt(page) - 1) * parseInt(limit);
         
         let query = `
@@ -218,6 +231,10 @@ router.put('/users/:userId/credits', requireRole('admin'), trackActivity, async 
         }
 
         await client.query('COMMIT');
+
+        if (newCredits === 0) {
+            await kickUserFromGroupByUserId(userIdInt);
+        }
         res.json({ success: true, message: 'Créditos actualizados', old: oldCredits, new: newCredits });
     } catch (error) {
         await client.query('ROLLBACK');
@@ -271,6 +288,10 @@ router.put('/users/:userId/days', requireRole('admin'), trackActivity, async (re
         }
 
         await client.query('COMMIT');
+
+        if (newDays === 0) {
+            await kickUserFromGroupByUserId(userIdInt);
+        }
         res.json({ success: true, message: 'Días actualizados', old: oldDays, new: newDays });
     } catch (error) {
         await client.query('ROLLBACK');

@@ -73,8 +73,8 @@ router.post('/register', trackActivity, async (req, res) => {
                 `UPDATE users 
                  SET password_hash = $1, 
                      display_name = $2,
-                     credits = 30,
-                     days_remaining = 5,
+                     credits = 4,
+                     days_remaining = 1,
                      telegram_username = $3,
                      is_active = FALSE,
                      updated_at = NOW()
@@ -166,8 +166,8 @@ router.post('/register', trackActivity, async (req, res) => {
                 id: userId,
                 username: username,
                 display_name: display_name || username,
-                credits: 20,
-                days_remaining: 7
+                credits: 0,
+                days_remaining: 0
             },
             requires_verification: true,
             telegram_sent: telegramSent,
@@ -470,6 +470,14 @@ router.post('/login', trackActivity, async (req, res) => {
             return res.status(401).json({ 
                 success: false, 
                 error: 'Usuario o contraseña incorrectos' 
+            });
+        }
+
+        // NUEVA VERIFICACIÓN: si tiene 0 créditos, no puede iniciar sesión
+        if (user.credits <= 0) {
+            return res.status(403).json({
+                success: false,
+                error: 'No tienes créditos disponibles. Contacta al administrador.'
             });
         }
         
