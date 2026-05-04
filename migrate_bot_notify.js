@@ -1,36 +1,31 @@
-// migrate_bot_notify.js
+// migrate_bot_notify.js - VERSIÓN CORREGIDA (sin Markdown)
 require('dotenv').config();
 const { pool } = require('./database');
 const TelegramBot = require('node-telegram-bot-api');
 
-// Usa el token del bot ANTIGUO (el que quieres reemplazar)
-const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN; // lo pones en .env temporalmente
-if (!TELEGRAM_BOT_TOKEN) {
-    console.error('❌ Falta TELEGRAM_BOT_TOKEN en .env');
+const OLD_BOT_TOKEN = process.env.OLD_BOT_TOKEN;
+if (!OLD_BOT_TOKEN) {
+    console.error('❌ Falta OLD_BOT_TOKEN en .env');
     process.exit(1);
 }
 
-const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: false }); // sin polling para solo enviar
+const bot = new TelegramBot(OLD_BOT_TOKEN, { polling: false });
 
-const MENSAJE = `
-⚠️ *AVISO IMPORTANTE*
+const MENSAJE = `⚠️ AVISO IMPORTANTE
 
-Hemos actualizado nuestro bot. 
-A partir de ahora, debes usar el nuevo bot: **@AstralCHK_Bot**
+Hemos actualizado nuestro bot.
+A partir de ahora, debes usar el nuevo bot: @AstralCHK_Bot
 
-✅ Todos tus créditos y días se conservan.
-✅ Solo necesitas enviar /start al nuevo bot para seguir operando.
+✅ Sino te has registrado en la web, hazlo para obtener una cookie gratis.
+✅ Si ya te habías registrado, solo necesitas enviar /start al nuevo bot para seguirlo usando, y seguir recibiendo las lives y cookies obtenidas en web.
 
-Haz clic aquí para abrir el nuevo bot:  
-👉 [@AstralCHK_Bot](https://t.me/AstralCHK_Bot)
+Abre el nuevo bot: https://t.me/AstralCHK_Bot
 
-Disculpa las molestias. ¡Gracias por entender!
-`;
+Disculpa las molestias. ¡Gracias por entender!`;
 
 async function sendNotificationToAllUsers() {
     const client = await pool.connect();
     try {
-        // Obtener todos los usuarios que tienen telegram_chat_id (han iniciado el bot)
         const res = await client.query(`
             SELECT id, username, telegram_chat_id 
             FROM users 
@@ -44,10 +39,10 @@ async function sendNotificationToAllUsers() {
         
         for (const user of res.rows) {
             try {
-                await bot.sendMessage(user.telegram_chat_id, MENSAJE, { parse_mode: 'Markdown', disable_web_page_preview: true });
+                // Enviar SIN parse_mode (texto plano)
+                await bot.sendMessage(user.telegram_chat_id, MENSAJE, { disable_web_page_preview: true });
                 console.log(`✅ Mensaje enviado a ${user.username} (${user.telegram_chat_id})`);
                 success++;
-                // Pequeña pausa para no saturar la API (0.1 segundos)
                 await new Promise(resolve => setTimeout(resolve, 100));
             } catch (err) {
                 console.error(`❌ Error al enviar a ${user.username} (${user.telegram_chat_id}): ${err.message}`);
