@@ -503,6 +503,7 @@ bot.onText(/\/bot/, async (msg) => {
 // /extrapolador - permite BIN en el comando o interactivo
 bot.onText(/\/extrapolador(?:\s+(\d{6}))?/, async (msg, match) => {
     const chatId = msg.chat.id;
+    const telegramId = msg.from.id;
     if (!await checkAndKickIfNoDaysOrCredits(telegramId, chatId, 10)) return;
 
     let bin = match[1];

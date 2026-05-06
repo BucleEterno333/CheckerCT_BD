@@ -11,7 +11,7 @@ const { sendSafeMessage } = require('./bot_telegram');
 
 // 1. CORS
 app.use(cors({
-    origin: ['https://ciberterroristaschk.shop', 'https://silver-chinchilla-366445.hostingersite.com'],
+    origin: ['https://ciberterroristaschk.shop'],
     credentials: true,
     optionsSuccessStatus: 200
 }));
