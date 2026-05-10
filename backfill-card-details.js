@@ -1,14 +1,10 @@
 // scripts/backfill-card-details.js
-const { pool } = require('./database');
+const { pool } = require('./database'); // Ajusta la ruta si es necesario
 const axios = require('axios');
 
-// Configuración de NeutrinoAPI - ¡REEMPLAZA CON TUS CREDENCIALES!
-const NEUTRINO_USER_ID = 'tu-user-id';
-const NEUTRINO_API_KEY = 'tu-api-key';
-
 // Función para obtener red desde el primer dígito (fallback)
-function getNetworkFromFirstDigit(cardNumber) {
-    const first = cardNumber.toString()[0];
+function getNetworkByFirstDigit(cardNumber) {
+    const first = cardNumber.charAt(0);
     if (first === '4') return 'Visa';
     if (first === '5') return 'Mastercard';
     if (first === '3') return 'American Express';
@@ -16,143 +12,131 @@ function getNetworkFromFirstDigit(cardNumber) {
     return 'Otro';
 }
 
-// Función principal que prueba múltiples APIs hasta obtener una respuesta
-async function getBinInfo(bin) {
-    // Lista de fuentes a probar en orden
-    const sources = [
-        {
-            name: 'Chargeblast',
-            url: `https://api.chargeblast.com/bin/${bin}`,
-            process: (data) => ({
-                bank: data.bank?.name || null,
-                country: data.country?.name || null,
-                network: data.scheme ? data.scheme.charAt(0).toUpperCase() + data.scheme.slice(1) : null,
-                card_class: data.type === 'credit' ? 'Crédito' : (data.type === 'debit' ? 'Débito' : null)
-            })
-        },
-        {
-            name: 'Binlist.net',
-            url: `https://lookup.binlist.net/${bin}`,
-            process: (data) => ({
-                bank: data.bank?.name || null,
-                country: data.country?.name || null,
-                network: data.scheme ? data.scheme.charAt(0).toUpperCase() + data.scheme.slice(1) : null,
-                card_class: data.type === 'credit' ? 'Crédito' : (data.type === 'debit' ? 'Débito' : null)
-            })
-        },
-        {
-            name: 'OpenBIN',
-            url: `https://openbin.org/${bin}.json`,
-            process: (data) => ({
-                bank: data.bank || null,
+// Normalizar a primera letra mayúscula y resto minúsculas
+function normalize(str) {
+    if (!str) return null;
+    return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
+}
+
+// Obtener información desde Chargeblast (sin límites conocidos)
+async function fetchFromChargeblast(bin) {
+    try {
+        const response = await axios.get(`https://api.chargeblast.com/bin/${bin}`, { timeout: 10000 });
+        if (response.status === 200 && response.data) {
+            const data = response.data;
+            return {
+                network: data.brand ? normalize(data.brand) : null,
+                bank_name: data.issuer || null,
                 country: data.country || null,
-                network: data.scheme ? data.scheme.charAt(0).toUpperCase() + data.scheme.slice(1) : null,
-                card_class: data.type ? (data.type === 'credit' ? 'Crédito' : (data.type === 'debit' ? 'Débito' : null)) : null
-            })
-        },
-        {
-            name: 'NeutrinoAPI',
-            url: 'https://neutrinoapi.net/bin-lookup',
-            method: 'POST',
-            headers: {
-                'User-ID': NEUTRINO_USER_ID,
-                'API-Key': NEUTRINO_API_KEY,
-                'Content-Type': 'application/x-www-form-urlencoded'
-            },
-            process: (data) => ({
-                bank: data['issuer'] || null,
-                country: data['country-code'] || null,
-                network: data['card-brand'] || null,
-                card_class: data['card-type'] === 'CREDIT' ? 'Crédito' : (data['card-type'] === 'DEBIT' ? 'Débito' : null)
-            }),
-            getBody: (bin) => `bin-number=${bin}`
+                card_class: data.type === 'DEBIT' ? 'Débito' : (data.type === 'CREDIT' ? 'Crédito' : null),
+            };
         }
-    ];
-
-    for (const source of sources) {
-        try {
-            let response;
-            if (source.method === 'POST') {
-                response = await axios.post(source.url, source.getBody(bin), {
-                    headers: source.headers,
-                    timeout: 10000
-                });
-            } else {
-                response = await axios.get(source.url, { timeout: 10000 });
-            }
-
-            if (response.status === 200 && response.data && !response.data.error) {
-                // Si la respuesta tiene la estructura esperada
-                if (Object.keys(response.data).length > 0 && (response.data.bank || response.data.scheme || response.data.country)) {
-                    console.log(`✅ Datos obtenidos de ${source.name} para BIN ${bin}`);
-                    return source.process(response.data);
-                }
-            }
-        } catch (err) {
-            // Si es un error 429 (demasiadas peticiones), no seguimos con esta fuente
-            if (err.response?.status === 429) {
-                console.log(`⚠️ Rate limit alcanzado en ${source.name}, cambiando a siguiente fuente...`);
-                continue;
-            }
-            // Para otros errores, simplemente pasamos a la siguiente fuente
-        }
+    } catch (err) {
+        // Silenciamos errores de conexión
     }
-
-    // Si no se obtuvo respuesta de ninguna API
-    console.log(`❌ No se encontraron datos para BIN ${bin} en ninguna fuente`);
     return null;
 }
 
-// Función principal de backfill
+// Obtener información desde Binlist (solo como respaldo)
+async function fetchFromBinlist(bin) {
+    try {
+        const response = await axios.get(`https://lookup.binlist.net/${bin}`, { timeout: 10000 });
+        if (response.status === 200 && response.data) {
+            const data = response.data;
+            return {
+                network: data.brand ? normalize(data.brand) : null,
+                bank_name: data.bank?.name || null,
+                country: data.country?.name || null,
+                card_class: data.type === 'debit' ? 'Débito' : (data.type === 'credit' ? 'Crédito' : null),
+            };
+        }
+    } catch (err) {
+        // Silenciamos errores
+    }
+    return null;
+}
+
+// Función principal que combina las fuentes
+async function getBinInfo(bin) {
+    // 1. Intentar Chargeblast (sin límites)
+    const chargeblastData = await fetchFromChargeblast(bin);
+    if (chargeblastData && (chargeblastData.bank_name || chargeblastData.country || chargeblastData.card_class)) {
+        return chargeblastData;
+    }
+
+    // 2. Si Chargeblast no tiene datos, usar Binlist (pero con límite)
+    const binlistData = await fetchFromBinlist(bin);
+    if (binlistData && (binlistData.bank_name || binlistData.country || binlistData.card_class)) {
+        return binlistData;
+    }
+
+    // 3. Si nada funciona, devolver solo la red por el primer dígito
+    return null;
+}
+
 async function backfillCards() {
     const client = await pool.connect();
     let processed = 0;
-    let successCount = 0;
-    
+    let updated = 0;
+
     try {
+        // Asegurar que las columnas existan (ejecutar una sola vez)
+        await client.query(`
+            ALTER TABLE user_lives 
+            ADD COLUMN IF NOT EXISTS network VARCHAR(50),
+            ADD COLUMN IF NOT EXISTS card_class VARCHAR(20)
+        `);
+
+        // Seleccionar tarjetas que aún tengan campos nulos
         const res = await client.query(`
             SELECT id, card_full, network, bank_name, country, card_class
             FROM user_lives
-            WHERE (network IS NULL OR bank_name IS NULL OR country IS NULL OR card_class IS NULL)
+            WHERE (bank_name IS NULL OR country IS NULL OR card_class IS NULL OR network IS NULL)
+            ORDER BY id
         `);
         const cards = res.rows;
-        console.log(`📦 Encontradas ${cards.length} tarjetas para procesar...`);
+        console.log(`📦 ${cards.length} tarjetas pendientes de enriquecer`);
 
         for (const card of cards) {
             const parts = card.card_full?.split('|');
             const cardNumber = parts?.[0];
             if (!cardNumber || cardNumber.length < 6) {
-                console.log(`⏭️ Saltando tarjeta ID ${card.id}: número inválido.`);
+                console.log(`⏭️ ID ${card.id}: número inválido`);
                 continue;
             }
-
             processed++;
             const bin = cardNumber.slice(0, 6);
-            let network = card.network;
-            let bank = card.bank_name;
-            let country = card.country;
-            let cardClass = card.card_class;
-            let updated = false;
 
-            // 1. Calcular red por defecto si no existe (fallback)
+            let network = card.network;
+            let bank_name = card.bank_name;
+            let country = card.country;
+            let card_class = card.card_class;
+
+            // Si falta la red, calcular por el primer dígito (fallback)
             if (!network) {
-                network = getNetworkFromFirstDigit(cardNumber);
-                updated = true;
+                network = getNetworkByFirstDigit(cardNumber);
+                console.log(`🔢 ID ${card.id}: Red calculada por dígito -> ${network}`);
             }
 
-            // 2. Intentar obtener datos de las APIs si falta información
-            if (!bank || !country || !cardClass) {
+            // Si faltan otros campos, consultar APIs
+            if (!bank_name || !country || !card_class) {
                 const binInfo = await getBinInfo(bin);
                 if (binInfo) {
-                    if (!bank && binInfo.bank) { bank = binInfo.bank; updated = true; }
-                    if (!country && binInfo.country) { country = binInfo.country; updated = true; }
-                    if (!cardClass && binInfo.card_class) { cardClass = binInfo.card_class; updated = true; }
-                    if (binInfo.network && (!network || network === 'Otro')) { network = binInfo.network; updated = true; }
-                    if (bank && country && cardClass) successCount++;
+                    if (!bank_name && binInfo.bank_name) bank_name = binInfo.bank_name;
+                    if (!country && binInfo.country) country = binInfo.country;
+                    if (!card_class && binInfo.card_class) card_class = binInfo.card_class;
+                    if (!network && binInfo.network) network = binInfo.network;
                 }
             }
 
-            if (updated) {
+            // Armar objeto con solo los campos que han cambiado
+            const updates = {};
+            if (network && network !== card.network) updates.network = network;
+            if (bank_name && bank_name !== card.bank_name) updates.bank_name = bank_name;
+            if (country && country !== card.country) updates.country = country;
+            if (card_class && card_class !== card.card_class) updates.card_class = card_class;
+
+            if (Object.keys(updates).length > 0) {
                 await client.query(`
                     UPDATE user_lives
                     SET network = COALESCE($1, network),
@@ -160,17 +144,18 @@ async function backfillCards() {
                         country = COALESCE($3, country),
                         card_class = COALESCE($4, card_class)
                     WHERE id = $5
-                `, [network, bank, country, cardClass, card.id]);
-                console.log(`✅ [${processed}/${cards.length}] ID ${card.id} -> Red: ${network}, Banco: ${bank || 'N/A'}, País: ${country || 'N/A'}, Clase: ${cardClass || 'N/A'}`);
+                `, [updates.network || null, updates.bank_name || null, updates.country || null, updates.card_class || null, card.id]);
+                console.log(`✅ [${processed}/${cards.length}] ID ${card.id} -> Red: ${updates.network || card.network || 'N/A'}, Banco: ${updates.bank_name || card.bank_name || 'N/A'}, País: ${updates.country || card.country || 'N/A'}, Clase: ${updates.card_class || card.card_class || 'N/A'}`);
+                updated++;
             } else {
-                console.log(`⏭️ [${processed}/${cards.length}] ID ${card.id}: sin cambios.`);
+                console.log(`⏭️ [${processed}/${cards.length}] ID ${card.id}: sin cambios (ya tiene todos los datos o no se obtuvieron nuevos)`);
             }
 
-            // Pequeña pausa para ser respetuosos con los servidores
-            await new Promise(r => setTimeout(r, 1000));
+            // Pausa de 2 segundos entre solicitudes para no saturar
+            await new Promise(r => setTimeout(r, 2000));
         }
 
-        console.log(`🎉 Proceso completado. Éxitos: ${successCount} de ${processed}`);
+        console.log(`🎉 Terminado. Actualizadas ${updated} de ${processed} tarjetas.`);
     } catch (err) {
         console.error('❌ Error durante el backfill:', err);
     } finally {
