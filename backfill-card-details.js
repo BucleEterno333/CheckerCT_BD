@@ -1,5 +1,5 @@
 // scripts/backfill-card-details.js
-const { pool } = require('../database');
+const { pool } = require('./database');
 const axios = require('axios');
 
 // Configuración de NeutrinoAPI - ¡REEMPLAZA CON TUS CREDENCIALES!
