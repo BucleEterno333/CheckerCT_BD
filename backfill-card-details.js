@@ -1,8 +1,9 @@
-// scripts/backfill-card-details.js
-const { pool } = require('./database'); // Ajusta la ruta a tu conexión de BD
-const axios = require('axios'); // npm install axios si no lo tienes
+const { pool } = require('../database');
+const axios = require('axios');
 
-// Función para obtener red (network) desde el primer dígito
+const DELAY_MS = 12000;
+const MAX_RETRIES = 3;
+
 function getNetworkFromFirstDigit(cardNumber) {
     const first = cardNumber.toString()[0];
     if (first === '4') return 'Visa';
@@ -12,19 +13,23 @@ function getNetworkFromFirstDigit(cardNumber) {
     return 'Otro';
 }
 
-// Función para consultar binlist.net
-async function getBinInfo(bin) {
+async function getBinInfo(bin, retryCount = 0) {
     try {
-        const response = await axios.get(`https://lookup.binlist.net/${bin}`, { timeout: 5000 });
+        const response = await axios.get(`https://lookup.binlist.net/${bin}`, { timeout: 10000 });
         if (response.data) {
             return {
                 bank: response.data.bank?.name || null,
                 country: response.data.country?.name || null,
-                scheme: response.data.scheme || null,      // visa, mastercard, etc.
-                type: response.data.type || null           // credit, debit
+                scheme: response.data.scheme || null,
+                type: response.data.type === 'credit' ? 'Crédito' : (response.data.type === 'debit' ? 'Débito' : null)
             };
         }
     } catch (err) {
+        if (err.response?.status === 429 && retryCount < MAX_RETRIES) {
+            console.log(`⚠️ Rate limit (429) para BIN ${bin}. Reintentando en ${DELAY_MS/1000}s... (Intento ${retryCount + 1}/${MAX_RETRIES})`);
+            await new Promise(r => setTimeout(r, DELAY_MS));
+            return getBinInfo(bin, retryCount + 1);
+        }
         console.warn(`Error consultando BIN ${bin}: ${err.message}`);
     }
     return { bank: null, country: null, scheme: null, type: null };
@@ -33,12 +38,7 @@ async function getBinInfo(bin) {
 async function backfillCards() {
     const client = await pool.connect();
     try {
-        // Obtener todas las tarjetas que tengan campos nulos (o vacíos) que queremos rellenar
-        const res = await client.query(`
-            SELECT id, card_full, network, bank_name, country, card_class
-            FROM user_lives
-            WHERE (network IS NULL OR bank_name IS NULL OR country IS NULL OR card_class IS NULL)
-        `);
+        const res = await client.query(`SELECT id, card_full, network, bank_name, country, card_class FROM user_lives WHERE (network IS NULL OR bank_name IS NULL OR country IS NULL OR card_class IS NULL) LIMIT 20`); // 👈 Ajusta o elimina el LIMIT 20 cuando estés seguro
         const cards = res.rows;
         console.log(`📦 Encontradas ${cards.length} tarjetas para procesar...`);
 
@@ -46,7 +46,7 @@ async function backfillCards() {
             const parts = card.card_full?.split('|');
             const cardNumber = parts?.[0];
             if (!cardNumber || cardNumber.length < 6) {
-                console.log(`⏭️  Saltando tarjeta ID ${card.id}: número inválido`);
+                console.log(`⏭️ Saltando tarjeta ID ${card.id}: número inválido`);
                 continue;
             }
 
@@ -56,26 +56,17 @@ async function backfillCards() {
             let country = card.country;
             let cardClass = card.card_class;
 
-            // Si la red no está asignada, obtenerla del primer dígito (más rápido)
-            if (!network) {
-                network = getNetworkFromFirstDigit(cardNumber);
-            }
+            if (!network) network = getNetworkFromFirstDigit(cardNumber);
 
-            // Si faltan bank, country o class, consultar API
             if (!bank || !country || !cardClass) {
                 const binInfo = await getBinInfo(bin);
                 if (binInfo) {
                     if (!bank && binInfo.bank) bank = binInfo.bank;
                     if (!country && binInfo.country) country = binInfo.country;
-                    if (!cardClass && binInfo.type) {
-                        // Normalizar: credit -> Crédito, debit -> Débito
-                        cardClass = binInfo.type === 'credit' ? 'Crédito' : (binInfo.type === 'debit' ? 'Débito' : null);
-                    }
-                    // Si no se obtuvo scheme, ya tenemos network del primer dígito
+                    if (!cardClass && binInfo.type) cardClass = binInfo.type;
                 }
             }
 
-            // Actualizar la tarjeta en BD
             await client.query(`
                 UPDATE user_lives
                 SET network = COALESCE($1, network),
@@ -86,10 +77,8 @@ async function backfillCards() {
             `, [network, bank, country, cardClass, card.id]);
 
             console.log(`✅ Actualizada tarjeta ID ${card.id} -> red: ${network}, banco: ${bank}, país: ${country}, clase: ${cardClass}`);
-            // Pequeña pausa para no saturar la API
-            await new Promise(r => setTimeout(r, 200));
+            await new Promise(r => setTimeout(r, DELAY_MS));
         }
-
         console.log('🎉 Proceso completado.');
     } catch (err) {
         console.error('❌ Error durante el backfill:', err);
