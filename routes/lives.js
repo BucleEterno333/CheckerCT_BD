@@ -66,6 +66,42 @@ router.post('/', trackActivity, async (req, res) => {
     }
 });
 
+
+// POST /api/lives/:liveId/enrich
+router.post('/:liveId/enrich', async (req, res) => {
+    try {
+        const { liveId } = req.params;
+        const live = await pool.query('SELECT card_full FROM user_lives WHERE id = $1 AND user_id = $2', [liveId, req.user.id]);
+        if (live.rows.length === 0) return res.status(404).json({ success: false, error: 'Live no encontrada' });
+        
+        const cardNumber = live.rows[0].card_full.split('|')[0];
+        const bin = cardNumber.slice(0, 6);
+        
+        // Llamar a binlist.net
+        const response = await fetch(`https://lookup.binlist.net/${bin}`);
+        if (!response.ok) throw new Error('Error consultando BIN');
+        const data = await response.json();
+        
+        const updates = {};
+        if (data.bank && data.bank.name) updates.bank_name = data.bank.name;
+        if (data.country && data.country.name) updates.country = data.country.name;
+        if (data.scheme) updates.network = data.scheme.charAt(0).toUpperCase() + data.scheme.slice(1); // visa, mastercard
+        if (data.type) updates.card_class = data.type === 'credit' ? 'Crédito' : (data.type === 'debit' ? 'Débito' : 'Otro');
+        
+        if (Object.keys(updates).length > 0) {
+            const setClause = Object.keys(updates).map((k, i) => `${k} = $${i+1}`).join(', ');
+            const values = Object.values(updates);
+            values.push(liveId);
+            await pool.query(`UPDATE user_lives SET ${setClause} WHERE id = $${values.length}`, values);
+        }
+        
+        res.json({ success: true, message: 'Tarjeta enriquecida', data: updates });
+    } catch (error) {
+        console.error('Error enriqueciendo tarjeta:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
 // ========== OBTENER LIVE ESPECÍFICA ==========
 router.get('/:liveId', async (req, res) => {
     try {
@@ -200,8 +236,7 @@ router.delete('/:liveId', async (req, res) => {
 router.put('/:liveId', async (req, res) => {
     try {
         const { liveId } = req.params;
-        const { card_full, gate_name, bank_name, country, card_type, device_name, check_date, status, phase, notes } = req.body;
-
+        const { card_full, gate_name, bank_name, country, card_type, device_name, check_date, status, phase, notes, network, card_class } = req.body;
         const check = await pool.query('SELECT id FROM user_lives WHERE id = $1 AND user_id = $2', [liveId, req.user.id]);
         if (check.rows.length === 0) return res.status(404).json({ success: false, error: 'Live no encontrada' });
 
@@ -217,10 +252,12 @@ router.put('/:liveId', async (req, res) => {
                  status = COALESCE($8, status),
                  phase = COALESCE($9, phase),
                  notes = COALESCE($10, notes),
+                 network = COALESCE($11, network),
+                 card_class = COALESCE($12, card_class),
                  updated_at = NOW()
-             WHERE id = $11
+             WHERE id = $13
              RETURNING *`,
-            [card_full, gate_name, bank_name, country, card_type, device_name, check_date, status, phase, notes, liveId]
+            [card_full, gate_name, bank_name, country, card_type, device_name, check_date, status, phase, notes, network, card_class, liveId]
         );
         res.json({ success: true, live: result.rows[0] });
     } catch (error) {

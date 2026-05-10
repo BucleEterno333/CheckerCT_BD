@@ -8,23 +8,22 @@ class Live {
         
         // Extraer información de la tarjeta
         const cardNumber = card_full.split('|')[0];
+        const firstDigit = cardNumber.charAt(0);
+        let network = '';
+        if (firstDigit === '4') network = 'Visa';
+        else if (firstDigit === '5') network = 'Mastercard';
+        else if (firstDigit === '3') network = 'American Express';
+        else if (firstDigit === '6') network = 'Discover';
+        else network = 'Otro';
         const card_last_four = cardNumber.slice(-4);
         const card_bin = cardNumber.slice(0, 6);
         
         const result = await pool.query(
             `INSERT INTO user_lives 
-             (user_id, card_full, card_last_four, card_bin, gate_name, check_date, notes, created_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
-             RETURNING id, card_last_four, card_bin, gate_name, check_date`,
-            [
-                userId,
-                card_full,
-                card_last_four,
-                card_bin,
-                gate_name,
-                check_date || new Date().toISOString().split('T')[0],
-                notes
-            ]
+            (user_id, card_full, card_last_four, card_bin, gate_name, check_date, notes, network, card_class, created_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+            RETURNING id`,
+            [userId, card_full, card_last_four, card_bin, gate_name, check_date || new Date().toISOString().split('T')[0], notes, network, null]
         );
         
         return result.rows[0];
