@@ -11,7 +11,7 @@ const { sendSafeMessage } = require('./bot_telegram');
 
 // 1. CORS
 app.use(cors({
-    origin: ['https://ciberterroristaschk.shop'],
+    origin: ['https://astralchk.com'],
     credentials: true,
     optionsSuccessStatus: 200
 }));

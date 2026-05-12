@@ -226,7 +226,7 @@ function formatearMensajeTelegram(card, result) {
     mensaje += `\n⏰ *Hora:* ${new Date().toLocaleString()}\n`;
     mensaje += `🛒 *Gate:* Amazon CHK\n`;
     mensaje += `\n━━━━━━━━━━━━━━━━━━━\n`;
-    mensaje += `@C1ber7errorist4sBot`;
+    mensaje += `@AstralCHK_Bot`;
     
     return mensaje;
 }
@@ -309,7 +309,7 @@ function formatearMensajeCookie(phone, password, cookieString, country = 'MX') {
     mensaje += `⏰ *Generada:* ${new Date().toLocaleString()}\n`;
     mensaje += `🛒 *Servicio:* Amazon Cookie Generator\n`;
     mensaje += `\n━━━━━━━━━━━━━━━━━━━\n`;
-    mensaje += `@C1ber7errorist4sBot`;
+    mensaje += `@AstralCHK_Bot`;
     
     return mensaje;
 }

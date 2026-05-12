@@ -360,7 +360,7 @@ bot.onText(/\/start/, async (msg) => {
                 `Ahora puedes registrarte en la web (y obtener una cookie gratis) siguiendo estos pasos:\n\n` +
                 `1. Ve a la página:\n\n` +
                 `                 ꧁⎝ 𓆩༺✧༻𓆪 ⎠꧂\n` +
-                `https://ciberterroristaschk.shop/login.html\n` +
+                `https://astralchk.com/login.html/login.html\n` +
                 `                 ꧁⎝ 𓆩༺✧༻𓆪 ⎠꧂ \n\n` +
                 `2. Usa tu usuario: @${username}\n\n` +
                 `3. Recibirás un código de verificación aquí. \n\n` +
@@ -484,7 +484,7 @@ bot.onText(/\/web/, async (msg) => {
     const chatId = msg.chat.id;
     await sendSafeMessage(
         chatId,
-        `🌐 *Accede a nuestra web oficial:*\n\n🔗 https://ciberterroristaschk.shop/\n\nDesde allí puedes gestionar tus lives, cuentas y más.`,
+        `🌐 *Accede a nuestra web oficial:*\n\n🔗 https://astralchk.com/\n\nDesde allí puedes gestionar tus lives, cuentas y más.`,
         { parse_mode: 'Markdown', disable_web_page_preview: true }
     );
 });
@@ -763,7 +763,7 @@ bot.onText(/\/creditos|\/credits|\/saldo|\/dias/, async (msg) => {
 
 bot.onText(/\/renovar/, async (msg) => {
     const chatId = msg.chat.id;
-    await sendSafeMessage(chatId, `🔄 *Renovación*\nContacta a [@C1ber7errorist4sBot](https://t.me/C1ber7errorist4sBot)`, { parse_mode: 'Markdown', disable_web_page_preview: true });
+    await sendSafeMessage(chatId, `🔄 *Renovación*\nContacta a [@AstralCHK_Bot](https://t.me/AstralCHK_Bot)`, { parse_mode: 'Markdown', disable_web_page_preview: true });
 });
 
 bot.onText(/\/id/, async (msg) => {

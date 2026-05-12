@@ -60,7 +60,7 @@ router.post('/register', trackActivity, async (req, res) => {
             if (!user.telegram_chat_id) {
                 return res.status(400).json({
                     success: false,
-                    error: `Debes dar /start al bot primero. Busca @C1ber7errorist4sBot en Telegram, escribe /start, y luego regístrate.`
+                    error: `Debes dar /start al bot primero. Busca @AstralCHK_Bot en Telegram, escribe /start, y luego regístrate.`
                 });
             }
             
@@ -94,7 +94,7 @@ router.post('/register', trackActivity, async (req, res) => {
             // Usuario NO ha dado /start - ERROR
             return res.status(400).json({
                 success: false,
-                error: `Debes dar /start al bot primero. Busca @C1ber7errorist4sBot en Telegram, escribe /start, y luego regístrate.`
+                error: `Debes dar /start al bot primero. Busca @AstralCHK_Bot en Telegram, escribe /start, y luego regístrate.`
             });
         }
         
