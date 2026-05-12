@@ -5,17 +5,51 @@ const { authenticate, requireRole, trackActivity } = require('../middleware/auth
 const Live = require('../models/Live');
 const Account = require('../models/UserAccount');
 const Contact = require('../models/Contact');
-const { bot } = require('../bot_telegram'); // si quieres notificar
+const { bot } = require('../bot_telegram');
 const { pool } = require('../database');
 const { sendSafeMessage } = require('../bot_telegram');
 
 router.use(authenticate);
 
-// ========== OBTENER LIVES ==========
+// ========== FUNCIÓN DE NORMALIZACIÓN DE BANCOS ==========
+function normalizeBankName(bankName) {
+    if (!bankName) return null;
+    const name = bankName.toLowerCase();
+    if (name.includes('bancoppel')) return 'BanCoppel';
+    if (name.includes('banco mercantil') || name.includes('banorte')) return 'Banorte';
+    if (name.includes('spin') || name.includes('oxxo')) return 'Spin by OXXO';
+    if (name.includes('compropago')) return 'ComproPago';
+    if (name.includes('bbva') || name.includes('bancomer')) return 'BBVA Bancomer';
+    if (name.includes('azteca')) return 'Banco Azteca';
+    if (name.includes('hsbc')) return 'HSBC';
+    if (name.includes('unisoluciones')) return 'Unisoluciones';
+    if (name.includes('santander')) return 'Santander';
+    if (name.includes('banamex') || name.includes('nacional de mexico')) return 'Banamex';
+    if (name.includes('u.s. bank') || name.includes('us bank')) return 'U.S. Bank';
+    // Si no coincide, devolvemos el original
+    return bankName;
+}
+
+function normalizeCountryName(countryName) {
+    if (!countryName) return null;
+    const name = countryName.toLowerCase();
+    if (name === 'mexico' || name.includes('mexico')) return 'México';
+    if (name === 'united states' || name === 'united states of america' || name.includes('united states')) return 'Estados Unidos';
+    // Agrega más países según necesites
+    return countryName;
+}
+
+// ========== OBTENER LIVES (con normalización) ==========
 router.get('/', async (req, res) => {
     try {
         const { status, gate, bin, page = 1, limit = 50 } = req.query;
-        const lives = await Live.getUserLives(req.user.id, { status, gate, bin, page: parseInt(page), limit: parseInt(limit) });
+        let lives = await Live.getUserLives(req.user.id, { status, gate, bin, page: parseInt(page), limit: parseInt(limit) });
+
+        // Normalizar bank_name en cada live
+        lives = lives.map(live => ({
+            ...live,
+            bank_name: normalizeBankName(live.bank_name)
+        }));
 
         const gatesResult = await pool.query(
             'SELECT DISTINCT gate_name FROM user_lives WHERE user_id = $1 ORDER BY gate_name',
@@ -44,12 +78,19 @@ router.get('/', async (req, res) => {
 // ========== CREAR LIVE ==========
 router.post('/', trackActivity, async (req, res) => {
     try {
-        const { card_full, gate_name, check_date, notes } = req.body;
+        let { card_full, gate_name, check_date, notes } = req.body;
         if (!card_full || !gate_name) {
             return res.status(400).json({ success: false, error: 'card_full y gate_name son requeridos' });
         }
 
+        // Normalizar el bank_name si viene en el cuerpo (aunque normalmente no viene al crear)
+        if (req.body.bank_name) req.body.bank_name = normalizeBankName(req.body.bank_name);
+
         const live = await Live.create(req.user.id, { card_full, gate_name, check_date, notes });
+        
+        // Si la creación devolvió bank_name, normalizarlo en la respuesta
+        if (live.bank_name) live.bank_name = normalizeBankName(live.bank_name);
+
         await Live.addAction({
             live_id: live.id,
             user_id: req.user.id,
@@ -66,8 +107,7 @@ router.post('/', trackActivity, async (req, res) => {
     }
 });
 
-
-// POST /api/lives/:liveId/enrich
+// ========== ENRIQUECER UNA LIVE (con normalización) ==========
 router.post('/:liveId/enrich', async (req, res) => {
     try {
         const { liveId } = req.params;
@@ -83,9 +123,9 @@ router.post('/:liveId/enrich', async (req, res) => {
         const data = await response.json();
         
         const updates = {};
-        if (data.bank && data.bank.name) updates.bank_name = data.bank.name;
+        if (data.bank && data.bank.name) updates.bank_name = normalizeBankName(data.bank.name);
         if (data.country && data.country.name) updates.country = data.country.name;
-        if (data.scheme) updates.network = data.scheme.charAt(0).toUpperCase() + data.scheme.slice(1); // visa, mastercard
+        if (data.scheme) updates.network = data.scheme.charAt(0).toUpperCase() + data.scheme.slice(1);
         if (data.type) updates.card_class = data.type === 'credit' ? 'Crédito' : (data.type === 'debit' ? 'Débito' : 'Otro');
         
         if (Object.keys(updates).length > 0) {
@@ -105,8 +145,12 @@ router.post('/:liveId/enrich', async (req, res) => {
 // ========== OBTENER LIVE ESPECÍFICA ==========
 router.get('/:liveId', async (req, res) => {
     try {
-        const live = await Live.getLiveWithActions(req.params.liveId, req.user.id);
+        let live = await Live.getLiveWithActions(req.params.liveId, req.user.id);
         if (!live) return res.status(404).json({ success: false, error: 'Live no encontrada' });
+        
+        // Normalizar bank_name
+        if (live.bank_name) live.bank_name = normalizeBankName(live.bank_name);
+        
         const accounts = await Account.getUserAccounts(req.user.id);
         const pages = await Live.getPages();
         res.json({ success: true, live, accounts, pages });
@@ -122,7 +166,17 @@ router.post('/:liveId/actions', trackActivity, async (req, res) => {
         const { liveId } = req.params;
         const { action_type, page_name, page_id, account_id, amount, product_name, is_direct_payment, rest_days, response_text, transferred_to, transfer_result, action_date, device_used, notes } = req.body;
 
-        const validActions = ['live_obtained', 'payment_declined', 'payment_approved', 'transferred_to_other', 'associated_account', 'manual_note'];
+        const validActions = [
+            'live_obtained',
+            'payment_declined',
+            'payment_approved',
+            'transferred_to_other',
+            'associated_account',
+            'manual_note',
+            'rechecked',           // ← Tarjeta rechecada
+            'rested',              // ← Tarjeta reposada
+            'removed_from_account' // ← Eliminada de cuenta
+        ];        
         if (!validActions.includes(action_type)) return res.status(400).json({ success: false, error: 'Tipo de acción inválido' });
 
         let finalPageId = page_id;
@@ -232,11 +286,15 @@ router.delete('/:liveId', async (req, res) => {
     }
 });
 
-// ========== ACTUALIZAR ==========
+// ========== ACTUALIZAR LIVE (con normalización del bank_name) ==========
 router.put('/:liveId', async (req, res) => {
     try {
         const { liveId } = req.params;
-        const { card_full, gate_name, bank_name, country, card_type, device_name, check_date, status, phase, notes, network, card_class } = req.body;
+        let { card_full, gate_name, bank_name, country, card_type, device_name, check_date, status, phase, notes, network, card_class } = req.body;
+        
+        // Normalizar bank_name si viene en la petición
+        if (bank_name) bank_name = normalizeBankName(bank_name);
+        
         const check = await pool.query('SELECT id FROM user_lives WHERE id = $1 AND user_id = $2', [liveId, req.user.id]);
         if (check.rows.length === 0) return res.status(404).json({ success: false, error: 'Live no encontrada' });
 
@@ -259,6 +317,12 @@ router.put('/:liveId', async (req, res) => {
              RETURNING *`,
             [card_full, gate_name, bank_name, country, card_type, device_name, check_date, status, phase, notes, network, card_class, liveId]
         );
+        
+        // Normalizar el bank_name en la respuesta
+        if (result.rows[0] && result.rows[0].bank_name) {
+            result.rows[0].bank_name = normalizeBankName(result.rows[0].bank_name);
+        }
+        
         res.json({ success: true, live: result.rows[0] });
     } catch (error) {
         console.error('Error actualizando live:', error);
@@ -266,8 +330,7 @@ router.put('/:liveId', async (req, res) => {
     }
 });
 
-
-// Transferir tarjeta a otro usuario (contacto)
+// ========== TRANSFERIR TARJETA ==========
 router.post('/:liveId/transfer', async (req, res) => {
     try {
         const { liveId } = req.params;
@@ -276,7 +339,6 @@ router.post('/:liveId/transfer', async (req, res) => {
             return res.status(400).json({ success: false, error: 'contact_id y page_id requeridos' });
         }
 
-        // Obtener contacto
         const contact = await Contact.getUserContacts(req.user.id).then(contacts => contacts.find(c => c.id == contact_id));
         if (!contact) return res.status(404).json({ success: false, error: 'Contacto no encontrado' });
         if (!contact.is_system_user || !contact.system_user_id) {
@@ -285,7 +347,6 @@ router.post('/:liveId/transfer', async (req, res) => {
 
         const transferResult = await Live.transferCard(liveId, req.user.id, contact.system_user_id, contact_id, page_id, result, notes);
 
-        // Enviar notificación por Telegram si el receptor tiene chat_id
         const receiverUser = await pool.query('SELECT telegram_chat_id FROM users WHERE id = $1', [transferResult.toUserId]);
         if (receiverUser.rows[0]?.telegram_chat_id && bot) {
             const card = await pool.query('SELECT card_last_four, gate_name FROM user_lives WHERE id = $1', [liveId]);
