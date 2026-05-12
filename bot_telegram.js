@@ -360,7 +360,7 @@ bot.onText(/\/start/, async (msg) => {
                 `Ahora puedes registrarte en la web (y obtener una cookie gratis) siguiendo estos pasos:\n\n` +
                 `1. Ve a la página:\n\n` +
                 `                 ꧁⎝ 𓆩༺✧༻𓆪 ⎠꧂\n` +
-                `https://astralchk.com/login.html/login.html\n` +
+                `https://astralchk.com/login.html\n` +
                 `                 ꧁⎝ 𓆩༺✧༻𓆪 ⎠꧂ \n\n` +
                 `2. Usa tu usuario: @${username}\n\n` +
                 `3. Recibirás un código de verificación aquí. \n\n` +
