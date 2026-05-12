@@ -1,14 +1,14 @@
 const express = require('express');
 const router = express.Router();
 const { authenticate, trackActivity } = require('../middleware/auth');
-const Contact = require('../models/Contact');
+const Email = require('../models/Email');
 
 router.use(authenticate);
 
 router.get('/', async (req, res) => {
     try {
-        const contacts = await Contact.getAll(req.user.id);
-        res.json({ success: true, contacts });
+        const emails = await Email.getAll(req.user.id);
+        res.json({ success: true, emails });
     } catch (error) {
         console.error(error);
         res.status(500).json({ success: false, error: error.message });
@@ -17,10 +17,10 @@ router.get('/', async (req, res) => {
 
 router.post('/', trackActivity, async (req, res) => {
     try {
-        const { name, phone, email, notes } = req.body;
-        if (!name) return res.status(400).json({ success: false, error: 'Nombre requerido' });
-        const contact = await Contact.create(req.user.id, { name, phone, email, notes });
-        res.json({ success: true, contact });
+        const { email, label, notes } = req.body;
+        if (!email) return res.status(400).json({ success: false, error: 'Email requerido' });
+        const emailObj = await Email.create(req.user.id, { email, label, notes });
+        res.json({ success: true, email: emailObj });
     } catch (error) {
         console.error(error);
         res.status(500).json({ success: false, error: error.message });
@@ -29,9 +29,9 @@ router.post('/', trackActivity, async (req, res) => {
 
 router.put('/:id', trackActivity, async (req, res) => {
     try {
-        const contact = await Contact.update(req.params.id, req.user.id, req.body);
-        if (!contact) return res.status(404).json({ success: false, error: 'Contacto no encontrado' });
-        res.json({ success: true, contact });
+        const email = await Email.update(req.params.id, req.user.id, req.body);
+        if (!email) return res.status(404).json({ success: false, error: 'Email no encontrado' });
+        res.json({ success: true, email });
     } catch (error) {
         console.error(error);
         res.status(500).json({ success: false, error: error.message });
@@ -40,9 +40,9 @@ router.put('/:id', trackActivity, async (req, res) => {
 
 router.delete('/:id', async (req, res) => {
     try {
-        const deleted = await Contact.delete(req.params.id, req.user.id);
-        if (!deleted) return res.status(404).json({ success: false, error: 'Contacto no encontrado' });
-        res.json({ success: true, message: 'Contacto eliminado' });
+        const deleted = await Email.delete(req.params.id, req.user.id);
+        if (!deleted) return res.status(404).json({ success: false, error: 'Email no encontrado' });
+        res.json({ success: true, message: 'Email eliminado' });
     } catch (error) {
         console.error(error);
         res.status(500).json({ success: false, error: error.message });

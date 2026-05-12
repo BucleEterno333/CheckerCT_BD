@@ -61,6 +61,19 @@ class UserAccount {
         );
         return result.rows;
     }
+
+    // Dentro de models/UserAccount.js, agrega:
+    static async getByPage(userId, pageId) {
+        const result = await pool.query(
+            `SELECT * FROM user_accounts 
+            WHERE user_id = $1 AND page_id = $2 
+            ORDER BY account_name`,
+            [userId, pageId]
+        );
+        return result.rows;
+    }
 }
+
+
 
 module.exports = UserAccount;

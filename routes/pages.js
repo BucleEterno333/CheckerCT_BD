@@ -1,11 +1,11 @@
 const express = require('express');
 const router = express.Router();
 const { authenticate, requireRole } = require('../middleware/auth');
-const Page = require('../models/Gate');
+const Page = require('../models/Page');
 
 router.use(authenticate);
 
-// Obtener todas las puertas visibles para el usuario
+// Obtener todas las páginas visibles para el usuario
 router.get('/', async (req, res) => {
     try {
         const isAdmin = req.user.role === 'admin';

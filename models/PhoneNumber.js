@@ -1,46 +1,46 @@
 const { pool } = require('../database');
 
-class Contact {
+class PhoneNumber {
     static async getAll(userId) {
         const result = await pool.query(
-            'SELECT * FROM contacts WHERE user_id = $1 ORDER BY name',
+            'SELECT * FROM phone_numbers WHERE user_id = $1 ORDER BY number',
             [userId]
         );
         return result.rows;
     }
 
-    static async create(userId, { name, phone, email, notes }) {
+    static async create(userId, { number, label, country_code, notes }) {
         const result = await pool.query(
-            `INSERT INTO contacts (user_id, name, phone, email, notes)
+            `INSERT INTO phone_numbers (user_id, number, label, country_code, notes)
              VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-            [userId, name, phone, email, notes]
+            [userId, number, label, country_code, notes]
         );
         return result.rows[0];
     }
 
     static async update(id, userId, data) {
-        const { name, phone, email, notes } = data;
+        const { number, label, country_code, notes } = data;
         const result = await pool.query(
-            `UPDATE contacts 
-             SET name = COALESCE($1, name),
-                 phone = COALESCE($2, phone),
-                 email = COALESCE($3, email),
+            `UPDATE phone_numbers 
+             SET number = COALESCE($1, number),
+                 label = COALESCE($2, label),
+                 country_code = COALESCE($3, country_code),
                  notes = COALESCE($4, notes),
                  updated_at = NOW()
              WHERE id = $5 AND user_id = $6
              RETURNING *`,
-            [name, phone, email, notes, id, userId]
+            [number, label, country_code, notes, id, userId]
         );
         return result.rows[0];
     }
 
     static async delete(id, userId) {
         const result = await pool.query(
-            'DELETE FROM contacts WHERE id = $1 AND user_id = $2 RETURNING id',
+            'DELETE FROM phone_numbers WHERE id = $1 AND user_id = $2 RETURNING id',
             [id, userId]
         );
         return result.rows.length > 0;
     }
 }
 
-module.exports = Contact;
+module.exports = PhoneNumber;

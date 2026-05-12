@@ -3,29 +3,32 @@ const express = require('express');
 const router = express.Router();
 const { authenticate, trackActivity } = require('../middleware/auth');
 const Account = require('../models/UserAccount');
+const { pool } = require('../database');
 
 // Todas las rutas requieren autenticación
 router.use(authenticate);
 
 // ========== RUTAS DE CUENTAS ==========
-
-// Obtener todas las cuentas del usuario
 router.get('/', async (req, res) => {
     try {
-        const { platform } = req.query;
-        const accounts = await Account.getUserAccounts(req.user.id, platform);
-        
-        res.json({
-            success: true,
-            accounts
-        });
-        
+        const { page_id, platform } = req.query;
+        let query = 'SELECT * FROM user_accounts WHERE user_id = $1';
+        const params = [req.user.id];
+        if (page_id) {
+            query += ' AND page_id = $2';
+            params.push(page_id);
+        } else if (platform) {
+            query += ' AND platform = $2';
+            params.push(platform);
+        }
+        query += ' ORDER BY account_name';
+        const result = await pool.query(query, params);
+        res.json({ success: true, accounts: result.rows });
     } catch (error) {
-        console.error('Error obteniendo cuentas:', error);
+        console.error(error);
         res.status(500).json({ success: false, error: error.message });
     }
 });
-
 // Crear nueva cuenta
 router.post('/', trackActivity, async (req, res) => {
     try {
