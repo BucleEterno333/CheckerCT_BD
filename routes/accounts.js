@@ -54,7 +54,8 @@ router.post('/', trackActivity, async (req, res) => {
         
         // Pasar 'platform' (que ahora tiene el valor correcto) al modelo
         const account = await Account.create(req.user.id, {
-            platform,
+            platform_name: platform,   // ← clave corregida
+            page_id: req.body.page_id,
             account_name,
             account_email,
             account_phone,

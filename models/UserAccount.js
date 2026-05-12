@@ -14,13 +14,13 @@ class UserAccount {
     }
 
     static async create(userId, data) {
-        const { page_id, account_name, account_email, account_phone, account_password, device_id, phone_number_id, notes } = data;
+        const { page_id, account_name, account_email, account_phone, account_password, device_id, phone_number_id, notes, platform_name } = data;
         const result = await pool.query(
             `INSERT INTO user_accounts 
-             (user_id, page_id, account_name, account_email, account_phone, account_password, device_id, phone_number_id, notes)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-             RETURNING *`,
-            [userId, page_id, account_name, account_email, account_phone, account_password, device_id, phone_number_id, notes]
+            (user_id, page_id, account_name, account_email, account_phone, account_password, device_id, phone_number_id, notes, platform_name)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            RETURNING *`,
+            [userId, page_id, account_name, account_email, account_phone, account_password, device_id, phone_number_id, notes, platform_name]
         );
         return result.rows[0];
     }
