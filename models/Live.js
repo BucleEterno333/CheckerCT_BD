@@ -117,6 +117,7 @@ class Live {
     }
 
     // Añadir acción a una live
+    // Dentro de models/Live.js
     static async addAction(actionData) {
         const {
             live_id,
@@ -139,32 +140,30 @@ class Live {
             notes = '',
             additional_info = {}
         } = actionData;
-        
+
         const client = await pool.connect();
-        
         try {
             await client.query('BEGIN');
-            
+
             // Verificar que la live existe y pertenece al usuario
             const liveCheck = await client.query(
                 'SELECT id FROM user_lives WHERE id = $1 AND user_id = $2',
                 [live_id, user_id]
             );
-            
             if (liveCheck.rows.length === 0) {
                 throw new Error('Live no encontrada o no pertenece al usuario');
             }
-            
+
             // Insertar la acción
             const result = await client.query(
                 `INSERT INTO live_actions 
-                 (live_id, user_id, action_type, page_id, page_name, account_id,
-                  amount, currency, product_name, is_direct_payment, rest_days,
-                  response_id, response_text, transferred_to, transfer_result,
-                  action_date, device_used, notes, additional_info, action_time)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 
-                         $14, $15, $16, $17, $18, $19, NOW())
-                 RETURNING id, action_type, action_date`,
+                (live_id, user_id, action_type, page_id, page_name, account_id,
+                amount, currency, product_name, is_direct_payment, rest_days,
+                response_id, response_text, transferred_to, transfer_result,
+                action_date, device_used, notes, additional_info, action_time)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 
+                        $14, $15, $16, $17, $18, $19, NOW())
+                RETURNING id`,
                 [
                     live_id, user_id, action_type, page_id, page_name, account_id,
                     amount, currency, product_name, is_direct_payment, rest_days,
@@ -173,50 +172,103 @@ class Live {
                     device_used, notes, additional_info
                 ]
             );
-            
-            // Actualizar estadísticas de la live si es necesario
-            if (action_type === 'payment_approved') {
+
+            // ========== RECALCULAR FASE Y ESTADO BASADO EN EL HISTORIAL COMPLETO ==========
+            // Obtener todas las acciones de esta live (ordenadas cronológicamente)
+            const actionsRes = await client.query(
+                `SELECT action_type, response_text FROM live_actions 
+                WHERE live_id = $1 ORDER BY action_date ASC, action_time ASC`,
+                [live_id]
+            );
+            const actions = actionsRes.rows;
+
+            let hasAssociated = false;
+            let hasPayment = false;
+            let hasPaymentApproved = false;
+            let hasInsufficientDecline = false;
+            let hasAnyDecline = false;
+
+            for (const act of actions) {
+                if (act.action_type === 'associated_account') hasAssociated = true;
+                if (act.action_type === 'payment_approved') {
+                    hasPayment = true;
+                    hasPaymentApproved = true;
+                }
+                if (act.action_type === 'payment_declined') {
+                    hasPayment = true;
+                    hasAnyDecline = true;
+                    const resp = (act.response_text || '').toLowerCase();
+                    if (resp.includes('insufficient') || resp.includes('sin fondos') || resp.includes('insuficiente')) {
+                        hasInsufficientDecline = true;
+                    }
+                }
+            }
+
+            let newPhase = 'pending';
+            let newStatus = null; // null significa que no se actualiza (queda el actual)
+
+            // Determinar fase
+            if (hasAssociated) {
+                newPhase = hasPayment ? 'associated_used' : 'associated';
+            } else {
+                newPhase = hasPayment ? 'used_without_assoc' : 'pending';
+            }
+
+            // Determinar estado
+            if (hasPaymentApproved) {
+                newStatus = 'live';
+            } else if (hasInsufficientDecline) {
+                newStatus = 'insufficient';
+            } else if (hasAnyDecline) {
+                newStatus = 'dead';
+            }
+            // Si no hay acciones de pago, no cambiamos el estado (se mantiene el que ya tenía)
+
+            // Actualizar la live con la nueva fase y posiblemente el nuevo estado
+            const updates = [];
+            const values = [];
+            let idx = 1;
+            if (newPhase) {
+                updates.push(`phase = $${idx++}`);
+                values.push(newPhase);
+            }
+            if (newStatus) {
+                updates.push(`status = $${idx++}`);
+                values.push(newStatus);
+            }
+            if (updates.length > 0) {
+                values.push(live_id);
                 await client.query(
-                    'UPDATE user_lives SET status = $1, phase = $2 WHERE id = $3',
-                    ['used', 'completed', live_id]
-                );
-            } else if (action_type === 'payment_declined') {
-                await client.query(
-                    'UPDATE user_lives SET phase = $1 WHERE id = $2',
-                    ['failed_attempt', live_id]
-                );
-            } else if (action_type === 'associated_account') {
-                await client.query(
-                    'UPDATE user_lives SET phase = $1 WHERE id = $2',
-                    ['associated', live_id]
+                    `UPDATE user_lives SET ${updates.join(', ')} WHERE id = $${idx}`,
+                    values
                 );
             }
-            
-            // Actualizar estadísticas de cuenta si se especificó
+
+            // Actualizar estadísticas de cuenta si se especificó (igual que antes)
             if (account_id) {
                 if (action_type === 'payment_approved') {
                     await client.query(
                         `UPDATE user_accounts 
-                         SET successful_attempts = successful_attempts + 1,
-                             total_amount = total_amount + COALESCE($1, 0),
-                             last_used = NOW()
-                         WHERE id = $2`,
+                        SET successful_attempts = successful_attempts + 1,
+                            total_amount = total_amount + COALESCE($1, 0),
+                            last_used = NOW()
+                        WHERE id = $2`,
                         [amount || 0, account_id]
                     );
                 } else if (action_type === 'payment_declined') {
                     await client.query(
                         `UPDATE user_accounts 
-                         SET failed_attempts = failed_attempts + 1,
-                             last_used = NOW()
-                         WHERE id = $1`,
+                        SET failed_attempts = failed_attempts + 1,
+                            last_used = NOW()
+                        WHERE id = $1`,
                         [account_id]
                     );
                 }
             }
-            
+
             await client.query('COMMIT');
             return result.rows[0];
-            
+
         } catch (error) {
             await client.query('ROLLBACK');
             throw error;

@@ -30,10 +30,13 @@ router.get('/', async (req, res) => {
     }
 });
 // Crear nueva cuenta
+// routes/accounts.js - Modifica el POST /accounts
 router.post('/', trackActivity, async (req, res) => {
     try {
+        // Permitir tanto 'platform' como 'platform_name'
+        const platform = req.body.platform_name || req.body.platform;
+        
         const {
-            platform,
             account_name,
             account_email,
             account_phone,
@@ -49,6 +52,7 @@ router.post('/', trackActivity, async (req, res) => {
             });
         }
         
+        // Pasar 'platform' (que ahora tiene el valor correcto) al modelo
         const account = await Account.create(req.user.id, {
             platform,
             account_name,
