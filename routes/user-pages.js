@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { authenticate, requireRole } = require('../middleware/auth');
-const UserPage = require('../models/UserPage');
+const UserPage = require('../models/UserPages');
 const { sendSafeMessage } = require('../bot_telegram');
 const { pool } = require('../database');
 

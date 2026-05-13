@@ -113,4 +113,4 @@ class UserPage {
     }
 }
 
-module.exports = UserPage;
+module.exports = UserPages;
