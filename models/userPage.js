@@ -5,8 +5,17 @@ class UserPage {
     static async getUserPages(userId) {
         const result = await pool.query(
             `SELECT up.*, 
-                (SELECT json_agg(json_build_object('id', pr.id, 'text', pr.response_text, 'code', pr.code, 'reason', pr.reason, 'solution', pr.solution, 'cloudinary_url', pr.cloudinary_url))
-                FROM page_responses pr WHERE pr.user_page_id = up.id) as responses
+                COALESCE(
+                    (SELECT json_agg(json_build_object(
+                        'id', pr.id,
+                        'text', pr.response_text,
+                        'code', pr.code,
+                        'reason', pr.reason,
+                        'solution', pr.solution,
+                        'cloudinary_url', pr.cloudinary_url
+                    )) FROM page_responses pr WHERE pr.user_page_id = up.id),
+                    '[]'::json
+                ) as responses
             FROM user_pages up
             WHERE up.user_id = $1
             ORDER BY up.name`,
@@ -26,7 +35,7 @@ class UserPage {
                 (user_id, name, login_type, verification, allow_card_association, has_3d, is_bineable)
                 VALUES ($1, $2, $3, $4, $5, $6, $7)
                 RETURNING *`,
-                [userId, name, login_type, verification, allow_card_association, has_3d, is_bineable]
+                [userId, name, login_type || 'email', verification || 'none', allow_card_association !== false, has_3d || false, is_bineable !== false]
             );
             const newPage = result.rows[0];
             // Insertar respuestas
@@ -70,16 +79,18 @@ class UserPage {
                 [name, login_type, verification, allow_card_association, has_3d, is_bineable, pageId, userId]
             );
             if (result.rows.length === 0) throw new Error('Página no encontrada');
-            // Eliminar respuestas anteriores y volver a insertar (simplificado)
+            // Eliminar respuestas anteriores y volver a insertar
             await client.query('DELETE FROM page_responses WHERE user_page_id = $1', [pageId]);
-            for (const resp of responses) {
-                if (resp.text) {
-                    await client.query(
-                        `INSERT INTO page_responses 
-                        (user_page_id, response_text, code, reason, solution, cloudinary_url)
-                        VALUES ($1, $2, $3, $4, $5, $6)`,
-                        [pageId, resp.text, resp.code || '', resp.reason || '', resp.solution || '', resp.cloudinary_url || '']
-                    );
+            if (responses) {
+                for (const resp of responses) {
+                    if (resp.text) {
+                        await client.query(
+                            `INSERT INTO page_responses 
+                            (user_page_id, response_text, code, reason, solution, cloudinary_url)
+                            VALUES ($1, $2, $3, $4, $5, $6)`,
+                            [pageId, resp.text, resp.code || '', resp.reason || '', resp.solution || '', resp.cloudinary_url || '']
+                        );
+                    }
                 }
             }
             await client.query('COMMIT');
