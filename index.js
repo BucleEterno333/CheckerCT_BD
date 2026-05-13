@@ -62,6 +62,7 @@ const numbersRouter = require('./routes/numbers');
 const emailsRouter = require('./routes/emails');
 const pagesRouter = require('./routes/pages');
 const gatesRouter = require('./routes/gates');
+const userPagesRouter = require('./routes/user-pages');
 
 app.use('/api/contacts', contactsRouter);
 app.use('/api/numbers', numbersRouter);
@@ -78,6 +79,8 @@ app.use('/api/user', userRoutes);
 app.use('/api/contacts', contactsRoutes);
 app.use('/api/user-accounts', userAccountsRoutes);
 app.use('/api/user-responses', userResponsesRoutes);
+app.use('/api/user-pages', userPagesRouter);
+
 
 
 // Inicializar servidor

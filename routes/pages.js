@@ -17,12 +17,19 @@ router.get('/', async (req, res) => {
     }
 });
 
-// Solo admin puede crear/editar
+// En routes/pages.js
 router.post('/', requireRole('admin'), async (req, res) => {
     try {
-        const { name, category } = req.body;
+        const { 
+            name, 
+            login_type = 'email', 
+            verification = 'none', 
+            allow_card_association = true, 
+            has_3d = false, 
+            is_bineable = true 
+        } = req.body;
         if (!name) return res.status(400).json({ success: false, error: 'Nombre requerido' });
-        const page = await Page.create(name, category, req.user.id);
+        const page = await Page.create(name, login_type, verification, allow_card_association, has_3d, is_bineable, req.user.id);
         res.json({ success: true, page });
     } catch (error) {
         console.error(error);
