@@ -17,9 +17,13 @@ router.get('/', async (req, res) => {
 
 router.post('/', trackActivity, async (req, res) => {
     try {
-        const { number, label, country_code, notes } = req.body;
-        if (!number) return res.status(400).json({ success: false, error: 'Número requerido' });
-        const phoneNumber = await PhoneNumber.create(req.user.id, { number, label, country_code, notes });
+        const { company, phone_number, has_data, verified, verified_name, registered_pages, notes } = req.body;
+        if (!company || !phone_number) {
+            return res.status(400).json({ success: false, error: 'Compañía y número son requeridos' });
+        }
+        const phoneNumber = await PhoneNumber.create(req.user.id, {
+            company, phone_number, has_data, verified, verified_name, registered_pages, notes
+        });
         res.json({ success: true, phoneNumber });
     } catch (error) {
         console.error(error);

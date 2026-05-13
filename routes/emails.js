@@ -17,9 +17,13 @@ router.get('/', async (req, res) => {
 
 router.post('/', trackActivity, async (req, res) => {
     try {
-        const { email, label, notes } = req.body;
-        if (!email) return res.status(400).json({ success: false, error: 'Email requerido' });
-        const emailObj = await Email.create(req.user.id, { email, label, notes });
+        const { name, email_address, phone, backup_phone, registered_pages, notes } = req.body;
+        if (!email_address) {
+            return res.status(400).json({ success: false, error: 'El correo electrónico es requerido' });
+        }
+        const emailObj = await Email.create(req.user.id, {
+            name, email_address, phone, backup_phone, registered_pages, notes
+        });
         res.json({ success: true, email: emailObj });
     } catch (error) {
         console.error(error);

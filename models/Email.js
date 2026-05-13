@@ -3,32 +3,40 @@ const { pool } = require('../database');
 class Email {
     static async getAll(userId) {
         const result = await pool.query(
-            'SELECT * FROM emails WHERE user_id = $1 ORDER BY email',
+            `SELECT id, name, email_address, phone, backup_phone, registered_pages, notes, created_at, updated_at
+             FROM emails WHERE user_id = $1 
+             ORDER BY email_address`,
             [userId]
         );
         return result.rows;
     }
 
-    static async create(userId, { email, label, notes }) {
+    static async create(userId, data) {
+        const { name, email_address, phone, backup_phone, registered_pages, notes } = data;
         const result = await pool.query(
-            `INSERT INTO emails (user_id, email, label, notes)
-             VALUES ($1, $2, $3, $4) RETURNING *`,
-            [userId, email, label, notes]
+            `INSERT INTO emails 
+             (user_id, name, email_address, phone, backup_phone, registered_pages, notes)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)
+             RETURNING *`,
+            [userId, name, email_address, phone, backup_phone, registered_pages || [], notes]
         );
         return result.rows[0];
     }
 
     static async update(id, userId, data) {
-        const { email, label, notes } = data;
+        const { name, email_address, phone, backup_phone, registered_pages, notes } = data;
         const result = await pool.query(
             `UPDATE emails 
-             SET email = COALESCE($1, email),
-                 label = COALESCE($2, label),
-                 notes = COALESCE($3, notes),
+             SET name = COALESCE($1, name),
+                 email_address = COALESCE($2, email_address),
+                 phone = COALESCE($3, phone),
+                 backup_phone = COALESCE($4, backup_phone),
+                 registered_pages = COALESCE($5, registered_pages),
+                 notes = COALESCE($6, notes),
                  updated_at = NOW()
-             WHERE id = $4 AND user_id = $5
+             WHERE id = $7 AND user_id = $8
              RETURNING *`,
-            [email, label, notes, id, userId]
+            [name, email_address, phone, backup_phone, registered_pages, notes, id, userId]
         );
         return result.rows[0];
     }

@@ -63,7 +63,9 @@ const emailsRouter = require('./routes/emails');
 const pagesRouter = require('./routes/pages');
 const gatesRouter = require('./routes/gates');
 const userPagesRouter = require('./routes/user-pages');
+const accountActionsRouter = require('./routes/account-actions');
 
+app.use('/api/accounts', accountActionsRouter);
 app.use('/api/contacts', contactsRouter);
 app.use('/api/numbers', numbersRouter);
 app.use('/api/emails', emailsRouter);
