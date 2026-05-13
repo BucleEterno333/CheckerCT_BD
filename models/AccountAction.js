@@ -39,8 +39,8 @@ class AccountAction {
             accountId, userId, action_type, action_date || new Date().toISOString(),
             amount, product, response_text, card_last4, field_updated, method, reason, result, notes
         ];
-        const result = await pool.query(query, values);
-        return result.rows[0];
+        const queryResult = await pool.query(query, values);
+        return queryResult.rows[0];
     }
 
     // Actualizar una acción existente
@@ -74,17 +74,17 @@ class AccountAction {
             RETURNING *
         `;
         const values = [action_date, amount, product, response_text, card_last4, field_updated, method, reason, result, notes, actionId, userId];
-        const result = await pool.query(query, values);
-        return result.rows[0];
+        const queryResult = await pool.query(query, values);
+        return queryResult.rows[0];
     }
 
     // Eliminar una acción
     static async delete(actionId, userId) {
-        const result = await pool.query(
+        const deleteResult = await pool.query(
             'DELETE FROM account_actions WHERE id = $1 AND user_id = $2 RETURNING id',
             [actionId, userId]
         );
-        return result.rows.length > 0;
+        return deleteResult.rows.length > 0;
     }
 }
 
