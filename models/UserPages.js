@@ -1,6 +1,6 @@
 const { pool } = require('../database');
 
-class UserPage {
+class UserPages {
     // Obtener todas las páginas personales de un usuario
     static async getUserPages(userId) {
         const result = await pool.query(
