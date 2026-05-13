@@ -31,7 +31,7 @@ class User {
         const result = await pool.query(
             `INSERT INTO users 
              (username, password_hash, display_name, credits, days_remaining, created_by)
-             VALUES ($1, $2, $3, 20, 7, $4)
+             VALUES ($1, $2, $3, 0, 0, $4)
              RETURNING id, username, display_name, credits, days_remaining, role, created_at`,
             [username, passwordHash, displayName || username, createdBy]
         );
