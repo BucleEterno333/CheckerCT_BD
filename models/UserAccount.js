@@ -72,6 +72,32 @@ class UserAccount {
         );
         return result.rows;
     }
+
+    static async update(accountId, userId, data) {
+        const { account_name, account_email, account_phone, platform_name, verified, notes } = data;
+        const result = await pool.query(
+            `UPDATE user_accounts 
+            SET account_name = COALESCE($1, account_name),
+                account_email = COALESCE($2, account_email),
+                account_phone = COALESCE($3, account_phone),
+                platform_name = COALESCE($4, platform_name),
+                verified = COALESCE($5, verified),
+                notes = COALESCE($6, notes),
+                updated_at = NOW()
+            WHERE id = $7 AND user_id = $8
+            RETURNING *`,
+            [account_name, account_email, account_phone, platform_name, verified, notes, accountId, userId]
+        );
+        return result.rows[0];
+    }
+
+    static async delete(accountId, userId) {
+        const result = await pool.query(
+            'DELETE FROM user_accounts WHERE id = $1 AND user_id = $2 RETURNING id',
+            [accountId, userId]
+        );
+        return result.rows.length > 0;
+    }
 }
 
 

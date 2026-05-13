@@ -108,20 +108,15 @@ router.get('/:accountId', async (req, res) => {
     }
 });
 
-// Actualizar cuenta
 router.put('/:accountId', trackActivity, async (req, res) => {
     try {
         const { accountId } = req.params;
         const updateData = req.body;
-        
         const account = await Account.update(accountId, req.user.id, updateData);
-        
-        res.json({
-            success: true,
-            account,
-            message: 'Cuenta actualizada exitosamente'
-        });
-        
+        if (!account) {
+            return res.status(404).json({ success: false, error: 'Cuenta no encontrada' });
+        }
+        res.json({ success: true, account, message: 'Cuenta actualizada exitosamente' });
     } catch (error) {
         console.error('Error actualizando cuenta:', error);
         res.status(500).json({ success: false, error: error.message });
