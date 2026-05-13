@@ -5,6 +5,7 @@ const UserPage = require('../models/UserPages');
 const { sendSafeMessage } = require('../bot_telegram');
 const { pool } = require('../database');
 
+
 // Todas las rutas requieren autenticación
 router.use(authenticate);
 

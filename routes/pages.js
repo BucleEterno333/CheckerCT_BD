@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const { authenticate, requireRole } = require('../middleware/auth');
 const Page = require('../models/Page');
+const { pool } = require('../database'); // ← importar pool
+
 
 router.use(authenticate);
 
