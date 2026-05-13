@@ -474,24 +474,6 @@ const initDatabase = async () => {
         // ============================================
         // 8. DATOS POR DEFECTO
         // ============================================
-        
-        // Insertar páginas comunes
-        const defaultPages = [
-            {name: 'amazon', display_name: 'Amazon', allows_associate: true, requires_2fa: true},
-            {name: 'aliexpress', display_name: 'AliExpress', allows_associate: true, requires_2fa: false},
-            {name: 'mercadolibre', display_name: 'MercadoLibre', allows_associate: true, requires_2fa: true},
-            {name: 'uber', display_name: 'Uber', allows_associate: false, requires_login_number: true},
-            {name: 'shein', display_name: 'Shein', allows_associate: false, requires_login_number: true},
-            {name: 'didi', display_name: 'Didi', allows_associate: false, requires_login_number: true}
-        ];
-        
-        for (const page of defaultPages) {
-            await pool.query(
-                `INSERT INTO pages (name, display_name, allows_associate, requires_2fa, requires_login_number) 
-                 VALUES ($1, $2, $3, $4, $5) ON CONFLICT (name) DO NOTHING`,
-                [page.name, page.display_name, page.allows_associate, page.requires_2fa, page.requires_login_number]
-            );
-        }
 
         // Insertar checkers por defecto
         const defaultCheckers = [
