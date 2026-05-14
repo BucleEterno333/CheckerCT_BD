@@ -17,12 +17,12 @@ router.get('/', async (req, res) => {
 
 router.post('/', trackActivity, async (req, res) => {
     try {
-        const { company, phone_number, has_data, verified, verified_name, registered_pages, notes } = req.body;
-        if (!company || !phone_number) {
+        const { telephone_company, phone_number, has_data, verified, verified_name, registered_pages, notes } = req.body;
+        if (!telephone_company || !phone_number) {
             return res.status(400).json({ success: false, error: 'Compañía y número son requeridos' });
         }
         const phoneNumber = await PhoneNumber.create(req.user.id, {
-            company, phone_number, has_data, verified, verified_name, registered_pages, notes
+            telephone_company, phone_number, has_data, verified, verified_name, registered_pages, notes
         });
         res.json({ success: true, phoneNumber });
     } catch (error) {
