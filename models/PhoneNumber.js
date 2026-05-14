@@ -19,7 +19,7 @@ class PhoneNumber {
              (user_id, company, phone_number, has_data, verified, verified_name, registered_pages, notes)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
              RETURNING *`,
-            [userId, company, phone_number, has_data || false, verified || false, verified_name, registered_pages || [], notes]
+            [userId, company, phone_number, has_data || false, verified || false, verified_name, registered_pages, notes]
         );
         return result.rows[0];
     }

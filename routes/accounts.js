@@ -8,6 +8,75 @@ const { pool } = require('../database');
 // Todas las rutas requieren autenticación
 router.use(authenticate);
 
+
+
+// Obtener todas las cuentas asociadas a un email
+router.get('/by-email/:emailId', async (req, res) => {
+    const { emailId } = req.params;
+    const userId = req.user.id;
+    
+    const result = await pool.query(
+        `SELECT a.*, p.name as page_name 
+         FROM accounts a
+         LEFT JOIN pages p ON a.page_id = p.id
+         WHERE a.email_id = $1 AND a.user_id = $2
+         ORDER BY a.created_at DESC`,
+        [emailId, userId]
+    );
+    res.json({ success: true, accounts: result.rows });
+});
+
+// Obtener todas las cuentas asociadas a un número
+router.get('/by-number/:numberId', async (req, res) => {
+    const { numberId } = req.params;
+    const userId = req.user.id;
+    
+    const result = await pool.query(
+        `SELECT a.*, p.name as page_name 
+         FROM accounts a
+         LEFT JOIN pages p ON a.page_id = p.id
+         WHERE a.number_id = $1 AND a.user_id = $2
+         ORDER BY a.created_at DESC`,
+        [numberId, userId]
+    );
+    res.json({ success: true, accounts: result.rows });
+});
+
+// Crear cuenta desde email/número (con menos campos)
+router.post('/from-contact', async (req, res) => {
+    const { email_id, number_id, page_name, password, notes } = req.body;
+    const userId = req.user.id;
+    
+    // Buscar o crear la página
+    let pageId = null;
+    if (page_name) {
+        const pageRes = await pool.query(
+            `SELECT id FROM pages WHERE name ILIKE $1`,
+            [page_name]
+        );
+        if (pageRes.rows.length > 0) {
+            pageId = pageRes.rows[0].id;
+        } else {
+            // Crear página personal
+            const newPage = await pool.query(
+                `INSERT INTO user_pages (user_id, name) VALUES ($1, $2) RETURNING id`,
+                [userId, page_name]
+            );
+            pageId = newPage.rows[0].id;
+        }
+    }
+    
+    const result = await pool.query(
+        `INSERT INTO accounts 
+         (user_id, email_id, number_id, page_id, password, platform_name, notes)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         RETURNING *`,
+        [userId, email_id, number_id, pageId, password, page_name, notes]
+    );
+    
+    res.json({ success: true, account: result.rows[0] });
+});
+
 // ========== RUTAS DE CUENTAS ==========
 router.get('/', async (req, res) => {
     try {
