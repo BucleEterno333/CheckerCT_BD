@@ -10,8 +10,8 @@ const { pool } = require('./database');
 const token = process.env.TELEGRAM_BOT_TOKEN;
 const INTERNAL_API_URL = process.env.INTERNAL_API_URL || 'http://basedatos:8080/api';
 const BOT_API_KEY = process.env.BOT_API_KEY || 'AALOL23894238HWKEJSNFSDGF';
-const API_GENCOOKIE_URL = process.env.API_GENCOOKIE_URL || 'https://p01--gencookie--fbxnqqg9zx4w.code.run';
-const API_EXTRAPOLADOR_URL = process.env.API_EXTRAPOLADOR_URL || 'https://p01--extrapolador--fbxnqqg9zx4w.code.run';
+const API_GENCOOKIE_URL = process.env.API_GENCOOKIE_URL || 'https://p01--gencookie--7ppzd7xy487n.code.run';
+const API_EXTRAPOLADOR_URL = process.env.API_EXTRAPOLADOR_URL || 'https://p01--extrapolador--7ppzd7xy487n.code.run';
 
 
 // Función segura para enviar mensajes (evita crashes por parse_mode)
