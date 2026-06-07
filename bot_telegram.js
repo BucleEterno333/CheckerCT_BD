@@ -573,10 +573,19 @@ bot.onText(/\/extrapolador(?:\s+(\d{6}))?/, async (msg, match) => {
     try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 3000000);
-        const response = await fetch(`${API_EXTRAPOLADOR_URL}/api/search-bin`, {
+        // Obtener el estado global forzado por el administrador
+        const globalForcePlaywright = await getGlobalForcePlaywright();
+
+        // Construir el body con o sin force_playwright
+        const requestBody = { country, add_address: true };
+        if (globalForcePlaywright) {
+            requestBody.force_playwright = true;
+        }
+
+        const response = await fetch(`${API_GENCOOKIE_URL}/generate`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ bin }),
+            body: JSON.stringify(requestBody),
             signal: controller.signal
         });
         clearTimeout(timeoutId);
