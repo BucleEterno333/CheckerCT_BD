@@ -32,7 +32,35 @@ async function sendSafeMessage(chatId, text, options = {}) {
         }
         return null;
     }
+
+
+
 }
+
+
+// Obtener el valor global de force_playwright
+async function getGlobalForcePlaywright() {
+    const res = await pool.query(
+        `SELECT value FROM global_settings WHERE key = 'force_playwright'`
+    );
+    if (res.rows.length === 0) {
+        // Valor por defecto: false (usar método rápido)
+        await pool.query(
+            `INSERT INTO global_settings (key, value) VALUES ('force_playwright', 'false')`
+        );
+        return false;
+    }
+    return res.rows[0].value === 'true';
+}
+
+// Establecer el valor global
+async function setGlobalForcePlaywright(value) {
+    await pool.query(
+        `UPDATE global_settings SET value = $1 WHERE key = 'force_playwright'`,
+        [value ? 'true' : 'false']
+    );
+}
+
 
 if (!token) {
     console.error('❌ ERROR: TELEGRAM_BOT_TOKEN no configurado');
@@ -96,6 +124,24 @@ async function getUserRoleByTelegramId(telegramId) {
     const res = await pool.query('SELECT role FROM users WHERE telegram_id = $1', [telegramId]);
     return res.rows[0]?.role;
 }
+
+
+
+bot.onText(/\/gencukilento/, async (msg) => {
+    const chatId = msg.chat.id;
+    const telegramId = msg.from.id;
+
+    const role = await getUserRoleByTelegramId(telegramId);
+    if (role !== 'admin') {
+        return await sendSafeMessage(chatId, '❌ No tienes permiso para usar este comando. Solo administradores.');
+    }
+
+    const current = await getGlobalForcePlaywright();
+    const newValue = !current;
+    await setGlobalForcePlaywright(newValue);
+    const status = newValue ? '✅ ACTIVADO (Forzar Playwright)' : '❌ DESACTIVADO (Método rápido)';
+    await sendSafeMessage(chatId, `🐢 Modo lento: ${status}`);
+});
 
 bot.onText(/\/estatusCuki/, async (msg) => {
     const chatId = msg.chat.id;
@@ -450,7 +496,7 @@ bot.onText(/^\/gencookie(?:\s+(\w+))?/i, async (msg, match) => {
             if (creditResult === null) throw new Error('Fallo en descuento');
             if (creditResult.creditsZero) {
                 await kickUserFromGroup(telegramId);
-                await sendSafeMessage(chatId, '⚠️ Has llegado a 0 créditos. Has sido expulsado del grupo. Contacta al admin para recargar.');
+                await sendSafeMessage(chatId, '⚠️ Has llegado a 0 créditos. Has sido expulsado del grupo VIP y se ha bloqueado tu acceso a la web y bot. Contacta al admin para recargar créditos.');
             }
             await incrementCookieCountBot(telegramId);
         } catch(creditError) { console.error('Error descontando créditos:', creditError); }
@@ -703,8 +749,8 @@ bot.onText(/\/limpiador(?:\s+(.+))?/, async (msg, match) => {
     }
 });
 
-// /chk amazon - primero pide la cookie, luego las tarjetas (orden inverso)
-bot.onText(/\/chk\s+amazon(?:\s+(.+))?/i, async (msg, match) => {
+// /amazon - primero pide la cookie, luego las tarjetas (orden inverso)
+bot.onText(/\/amazon(?:\s+(.+))?/i, async (msg, match) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
     // Verificar créditos primero
