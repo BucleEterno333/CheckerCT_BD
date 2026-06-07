@@ -477,10 +477,19 @@ bot.onText(/^\/gencookie(?:\s+(\w+))?/i, async (msg, match) => {
         try {
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 5000000);
+            // Obtener el estado global forzado por el administrador
+            const globalForcePlaywright = await getGlobalForcePlaywright();
+
+            // Construir el body con o sin force_playwright
+            const requestBody = { country, add_address: true };
+            if (globalForcePlaywright) {
+                requestBody.force_playwright = true;
+            }
+
             const response = await fetch(`${API_GENCOOKIE_URL}/generate`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ country, add_address: true }),
+                body: JSON.stringify(requestBody),
                 signal: controller.signal
             });
             clearTimeout(timeoutId);
