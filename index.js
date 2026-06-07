@@ -65,7 +65,9 @@ const gatesRouter = require('./routes/gates');
 const userPagesRouter = require('./routes/user-pages');
 const accountActionsRouter = require('./routes/account-actions');
 const devicesRouter = require('./routes/devices');
+const settingsRoutes = require('./routes/settings');
 
+app.use('/api/settings', settingsRoutes);
 app.use('/api/devices', devicesRouter);
 app.use('/api/accounts', accountActionsRouter);
 app.use('/api/contacts', contactsRouter);
@@ -110,6 +112,7 @@ const startServer = async () => {
         process.exit(1);
     }
 };
+
 
 
 
