@@ -337,6 +337,8 @@ bot.onText(/^\/(?:binlist|bins|list|binl|bnl)(?:\s+(.+))?/i, async (msg, match) 
     let query = match[1];
     if (!query) {
         setUserState(telegramId, { step: 'awaiting_binlist_query' });
+        console.log(`✅ Estado guardado para usuario ${telegramId}: awaiting_binlist_query`);
+
         return sendSafeMessage(chatId, '🏦 Ingresa el nombre de un banco o país:');
     }
     if (!await checkAndKickIfNoDaysOrCredits(telegramId, chatId, 0)) return;
@@ -846,24 +848,20 @@ bot.onText(/\/help/, async (msg) => {
         `📖 *Comandos:*\n/start\n/gencookie [país]\n/setcookie [cookie]\n/binlist [banco/pais]\n/extrapolador [bin|banco]\n/gen [extra|bin|banco]\n/amazon [extra|bin|tarjetas|banco]\n/amazoncookie\n/lattice [monto]\n/limpiador\n/creditos\n/menu`, { parse_mode: 'Markdown' });
 });
 
-// ========== MANEJO DE RESPUESTAS INTERACTIVAS (CORREGIDO) ==========
-// ========== MANEJO DE RESPUESTAS INTERACTIVAS (CORREGIDO - SIN bot.botInfo) ==========
+// ========== MANEJO DE RESPUESTAS INTERACTIVAS (VERSIÓN SIMPLE Y FUNCIONAL) ==========
 bot.on('message', async (msg) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
     const state = userStates.get(telegramId);
-    
-    // Si no hay estado activo o el mensaje es un comando, ignorar
+
+    // Solo responder si hay un estado activo y el mensaje NO es un comando
     if (!state || !state.step) return;
     if (msg.text?.startsWith('/')) return;
-    
-    // El texto que el usuario escribió (siempre usamos el texto plano)
+
+    // El texto que escribió el usuario (sin modificaciones)
     const userText = msg.text;
-    
-    // En chat privado, cualquier mensaje que no sea comando y haya estado se toma como respuesta
-    // No necesitamos verificar reply_to_message porque el estado ya es específico del usuario
-    
-    // Procesar según el paso
+
+    // Procesar según el paso esperado
     switch (state.step) {
         case 'awaiting_binlist_query':
             bot.emit('text', { ...msg, text: `/binlist ${userText}` });
@@ -896,7 +894,7 @@ bot.on('message', async (msg) => {
             await sendSafeMessage(chatId, `🔍 Verificando ${tarjetas.length} tarjetas con Lattice ($${amount})...`);
             try {
                 const resultados = [];
-                for (const card of tarjetas.slice(0,10)) {
+                for (const card of tarjetas.slice(0, 10)) {
                     const resp = await fetch(API_LATTICE_URL, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -925,6 +923,16 @@ bot.on('message', async (msg) => {
     }
     clearUserState(telegramId);
 });
+
+
+
+
+
+
+
+
+
+
 // ========== CALLBACK QUERY ==========
 bot.on('callback_query', async (callbackQuery) => {
     const msg = callbackQuery.message;
