@@ -381,7 +381,7 @@ bot.onText(extrapoladorRegex, async (msg, match) => {
 
     try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 segundos
+        const timeoutId = setTimeout(() => controller.abort(), 180000); // 60 segundos
 
         // ✅ Llamada CORRECTA a la API de extrapolador (Puppeteer)
         const response = await fetch(`${API_EXTRAPOLADOR_URL}/api/search-bin`, {
