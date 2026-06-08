@@ -36,14 +36,13 @@ bot.getMe().then(me => {
 
 // ========== SEPARADORES BONITOS ==========
 const SEPARATORS = [
-    '𓆝 𓆟 𓆞 𓆝 𓆟𓆝 𓆟 𓆞 𓆝 𓆟𓆝 𓆟 𓆞 𓆝 𓆟𓆝 𓆟 𓆞 𓆝 𓆟',
-    '⋆｡‧˚ʚ🍓ɞ˚‧｡⋆⋆｡‧˚ʚ🍓ɞ˚‧｡⋆⋆｡‧˚ʚ🍓ɞ˚‧｡⋆⋆｡‧˚ʚ🍓ɞ˚‧｡⋆⋆｡‧˚ʚ🍓ɞ˚‧｡⋆',
-    '𓆩༺✧༻𓆪  𓆩༺✧༻𓆪 𓆩༺✧༻𓆪 𓆩༺✧༻𓆪 𓆩༺✧༻𓆪 𓆩༺✧༻𓆪 𓆩༺✧༻𓆪 𓆩༺✧༻𓆪',
-    '𝄞⨾💿✮˚.⋆𝄞⨾💿✮˚.⋆𝄞⨾💿✮˚.⋆𝄞⨾💿✮˚.⋆𝄞⨾💿✮˚.⋆𝄞⨾💿✮˚.⋆𝄞⨾💿✮˚.⋆𝄞⨾💿✮˚.⋆',
-    '🪼⋆.ೃ࿔*:･🪼⋆.ೃ࿔*:･🪼⋆.ೃ࿔*:･🪼⋆.ೃ࿔*:･🪼⋆.ೃ࿔*:･🪼⋆.ೃ࿔*:･🪼⋆.ೃ࿔*:･',
-    'ᥫ᭡.🍥⋆🐇་༘🌷.ೃ࿔ᥫ᭡.🍥⋆🐇་༘🌷.ೃ࿔ᥫ᭡.🍥⋆🐇་༘🌷.ೃ࿔ᥫ᭡.🍥⋆🐇་༘🌷.ೃ࿔',
-    '✨🌟⭐✨🌟⭐✨🌟⭐✨🌟⭐✨🌟⭐✨🌟⭐✨🌟⭐',
-    '🔮✨🔮✨🔮✨🔮✨🔮✨🔮✨🔮✨🔮✨🔮✨🔮✨'
+    '𓆝 𓆟 𓆞 𓆝 𓆟𓆝 𓆟 𓆞 𓆝 𓆟𓆝 𓆟 𓆞 𓆝 𓆟𓆝',
+    '⋆｡‧˚ʚɞ˚‧｡⋆⋆｡‧˚ʚɞ˚‧｡⋆⋆｡‧˚ʚɞ˚‧｡⋆⋆｡‧˚ʚɞ˚‧｡⋆⋆｡‧˚ʚ',
+    '𓆩༺✧༻𓆪  𓆩༺✧༻𓆪 𓆩༺✧༻𓆪 𓆩༺✧༻𓆪 𓆩༺✧༻𓆪',
+    '𝄞⨾✮˚.⋆𝄞⨾✮˚.⋆𝄞⨾✮˚.⋆𝄞⨾✮˚.⋆𝄞⨾✮˚.⋆𝄞⨾✮˚',
+    '⋆.ೃ࿔*:･⋆.ೃ࿔*:･⋆.ೃ࿔*:･⋆.ೃ࿔*:･⋆.ೃ࿔*:･',
+    '་༘.ೃ࿔ᥫ᭡.⋆་༘.ೃ࿔ᥫ᭡.⋆་༘.ೃ࿔ᥫ᭡.⋆་༘.ೃ࿔ᥫ᭡.⋆',
+
 ];
 
 // Diccionario local de bins por banco
@@ -576,7 +575,22 @@ async function handleAmazonCommand(chatId, telegramId, param) {
                 });
                 clearTimeout(timeoutId);
                 const data = await resp.json();
+                const isFatalError = data.message && (
+                    data.message.toLowerCase().includes('cookie expirada') ||
+                    data.message.toLowerCase().includes('inicia sesión') ||
+                    data.message.toLowerCase().includes('cuenta baneada') ||
+                    data.message.toLowerCase().includes('account banned') ||
+                    data.message.toLowerCase().includes('entra a mi cuenta')
+                );
+
                 resultados.push({ card, status: data.status, message: data.message });
+
+                if (isFatalError) {
+                    // Detener la verificación
+                    await sendSafeMessage(chatId, `⛔ Error fatal: ${data.message}. No se continuará verificando más tarjetas.`);
+                    // Salir del bucle
+                    break;
+                }
             } catch (err) {
                 resultados.push({ card, status: 'ERROR', message: err.message });
             }
@@ -707,23 +721,30 @@ bot.onText(/^\/(?:amazon|amz)(?:\s+(.+))?/i, async (msg, match) => {
 bot.onText(/^\/(?:amazoncookie|amazoncuki|amazonck|amzck)(?:\s+(.+))?/i, async (msg, match) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
-    let param = match[1];
+    const param = match[1] ? match[1].trim() : null;
+    
+    // Limpiar cualquier estado previo para evitar conflictos
+    clearUserState(telegramId);
+    
     await sendSafeMessage(chatId, '🍪 Generando nueva cookie...');
     try {
         const response = await fetch(`${API_GENCOOKIE_URL}/generate`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ country: 'MX', add_address: true })
         });
         const data = await response.json();
-        if (!data.success) throw new Error('Error');
+        if (!data.success) throw new Error('Error al generar cookie');
         const cookie = data.data.cookie_string;
         await updateUserCookie(telegramId, cookie);
         const creditResult = await deductCredits(telegramId, 4);
-        await sendSafeMessage(chatId, `✅ Cookie generada. Créditos restantes: ${creditResult?.newCredits || '?'}. Ahora verificando...`);
+        await sendSafeMessage(chatId, `✅ Cookie generada. Créditos restantes: ${creditResult?.newCredits || '?'}.`);
+        
         if (param) {
-            await handleAmazonCommand(chatId, telegramId, param);
+            // Ejecutar amazon directamente sin pasar por estado
+            const fakeMsg = { ...msg, text: `/amazon ${param}` };
+            bot.emit('text', fakeMsg);
         } else {
             setUserState(telegramId, { step: 'awaiting_amazon_cards' });
-            await sendSafeMessage(chatId, '💳 Envía las tarjetas, patrón o BIN:');
+            await sendSafeMessage(chatId, '💳 Envía tarjetas, patrón, BIN o nombre de banco:');
         }
     } catch (err) {
         await sendSafeMessage(chatId, `❌ Error: ${err.message}`);
