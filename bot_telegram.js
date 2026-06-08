@@ -668,8 +668,10 @@ async function verificarTarjetasAmazonConCookie(tarjetas, cookie, chatId, telegr
     return resultados;
 }
 
-
-bot.onText(/\/amazon(?:\s+(.+))?/i, async (msg, match) => {
+// ========== COMANDO /AMAZON (paso 7) ==========
+const amazonRegex = /^\/(?:amazon|amz)(?:\s+(.+))?/i;
+bot.onText(amazonRegex, async (msg, match) => {
+// /amazon - Verifica tarjetas usando la cookie guardada (con extrapolación integrada)
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
     const user = await getUserByTelegramId(telegramId);
@@ -689,7 +691,7 @@ bot.onText(/\/amazon(?:\s+(.+))?/i, async (msg, match) => {
                 }
             };
             bot.on('message', handler);
-            setTimeout(() => resolve(null), 60000);
+            setTimeout(() => resolve(null), 300000);
         });
         if (respuesta !== 'si') return sendSafeMessage(chatId, '❌ Operación cancelada.');
         // Generar cookie automáticamente
