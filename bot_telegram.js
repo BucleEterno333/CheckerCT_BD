@@ -402,6 +402,7 @@ bot.onText(/^\/(?:extrapolador|extrapolado|extrapolad|extrapolar|extrapola|extra
 });
 
 // /gen y alias - VERSIÓN SIMPLE Y DEFINITIVA
+// /gen y alias - VERSIÓN SIMPLE Y DEFINITIVA
 bot.onText(/^\/(?:generadorccs|genccs|gen|gncc)(?:\s+(.+))?/i, async (msg, match) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
@@ -412,7 +413,7 @@ bot.onText(/^\/(?:generadorccs|genccs|gen|gncc)(?:\s+(.+))?/i, async (msg, match
     }
     if (!await checkAndKickIfNoDaysOrCredits(telegramId, chatId, 4)) return;
 
-    // 1. Extraer cantidad opcional (un número al final)
+    // Extraer cantidad opcional (un número al final)
     let cantidad = 10;
     let input = fullParam;
     const cantMatch = input.match(/\s+(\d+)$/);
@@ -422,24 +423,34 @@ bot.onText(/^\/(?:generadorccs|genccs|gen|gncc)(?:\s+(.+))?/i, async (msg, match
         input = input.substring(0, cantMatch.index);
     }
 
-    // 2. Normalizar (cambiar espacios, /, - por |)
-    let normalized = input.trim().replace(/[ /-]+/g, '|');
-
-    // 3. Detección: ¿es un EXTRA? (contiene pipe y patrón de fecha)
-    const esExtra = normalized.includes('|') && /[0-9X]+\|\d{1,2}\|\d{2,4}/.test(normalized);
+    // DETECCIÓN SIMPLE:
+    const tieneX = /[Xx]/.test(input);
+    const tieneFecha = /\d{1,2}[\/\-|]\d{2,4}/.test(input); // busca algo como 09/2029 o 09|2029
+    const esExtra = tieneX && tieneFecha;
     const esBin = /^\d{6}$/.test(input.trim());
     const esBanco = !esExtra && !esBin;
 
     try {
         if (esExtra) {
-            // --- Extra directo: solo generar tarjetas ---
+            // ----- EXTRA: generar tarjetas directamente -----
+            // Normalizar: reemplazar espacios, barras, guiones por pipe
+            let normalized = input.trim().replace(/[ /-]+/g, '|');
+            // Eliminar pipes duplicados
+            normalized = normalized.replace(/\|+/g, '|');
+            const partes = normalized.split('|');
+            if (partes.length >= 3) {
+                let [numBase, mes, año, cvv] = partes;
+                if (año.length === 2) año = '20' + año;
+                if (!cvv) cvv = 'rnd';
+                normalized = `${numBase}|${mes}|${año}|${cvv}`;
+            }
             const tarjetas = generarTarjetasDesdePatron(normalized, cantidad);
             const lista = tarjetas.slice(0,20).map(t => `\`${t}\``).join('\n');
             const resto = tarjetas.length > 20 ? `\n... y ${tarjetas.length-20} más` : '';
             await sendSafeMessage(chatId, `🎴 *Tarjetas generadas (${tarjetas.length}):*\n${lista}${resto}`, { parse_mode: 'Markdown' });
-        } 
+        }
         else if (esBin) {
-            // --- BIN: extrapolar, mostrar patrones y generar desde el mejor ---
+            // ----- BIN: extrapolar, mostrar patrones, generar desde el mejor -----
             await sendSafeMessage(chatId, `🔮 Extrapolando BIN ${input}...`);
             const response = await fetch(`${API_EXTRAPOLADOR_URL}/api/search-bin`, {
                 method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ bin: input })
@@ -460,17 +471,17 @@ bot.onText(/^\/(?:generadorccs|genccs|gen|gncc)(?:\s+(.+))?/i, async (msg, match
             }
             if (Object.keys(patrones).length === 0) throw new Error('No se extrajeron patrones');
 
-            // Ordenar por frecuencia
+            // Clasificar
             const items = Object.entries(patrones).map(([p,c]) => ({ patron: p, count: c }));
             const muy = items.filter(i => i.count >= 3).sort((a,b)=>b.count-a.count);
             const mod = items.filter(i => i.count === 2).sort((a,b)=>b.count-a.count);
             const uni = items.filter(i => i.count === 1).sort((a,b)=>b.count-a.count);
             const mejor = muy[0] || mod[0] || uni[0];
-            if (!mejor) throw new Error('No se encontró ningún patrón');
+            if (!mejor) throw new Error('No se encontró patrón');
             const [prefijo, mes, año] = mejor.patron.split('|');
             const extraElegido = `${prefijo}xxxx|${mes}|${año}|rnd`;
 
-            // Mostrar resumen de patrones
+            // Mostrar tabla de patrones
             let mensaje = `=== EXTRAPOLACIÓN COMPLETADA ===\n✅ EXTRA A GENERAR: \`${prefijo}xxxx | ${mes}/${año}\` | (${mejor.count} veces)\n\n`;
             if (muy.length) {
                 mensaje += `🟢 MUY REPETIDOS (${muy.length}):\n`;
@@ -500,30 +511,27 @@ bot.onText(/^\/(?:generadorccs|genccs|gen|gncc)(?:\s+(.+))?/i, async (msg, match
             }
             await sendSafeMessage(chatId, mensaje, { parse_mode: 'Markdown' });
 
-            // Generar tarjetas del mejor patrón
+            // Generar tarjetas
             const tarjetas = generarTarjetasDesdePatron(extraElegido, cantidad);
             const lista = tarjetas.slice(0,20).map(t => `\`${t}\``).join('\n');
             const resto = tarjetas.length > 20 ? `\n... y ${tarjetas.length-20} más` : '';
             await sendSafeMessage(chatId, `🎴 *Tarjetas generadas (${tarjetas.length}):*\n${lista}${resto}`, { parse_mode: 'Markdown' });
         }
         else {
-            // --- BANCO: aquí llamarías a tu API real de binlist (simulación) ---
+            // ----- BANCO: aquí debes conectar tu API real de binlist (simulación) -----
             await sendSafeMessage(chatId, `🔍 Buscando bins de "${input}"...`);
-            // Simulación: usa un bin por defecto (debes conectar tu API real)
+            // 🔁 Reemplazar con llamada real
             const binsEjemplo = ['415231', '557910'];
             const binElegido = binsEjemplo[0];
-            await sendSafeMessage(chatId, `✅ Usando BIN: ${binElegido}`);
-            // Ahora tratar como si fuera un BIN
+            await sendSafeMessage(chatId, `✅ Usando BIN: ${binElegido}. Generando desde BIN...`);
+            // Reenviar como si fuera un BIN
             const fakeMsg = { ...msg, text: `/gen ${binElegido} ${cantidad}` };
             bot.emit('text', fakeMsg);
-            return; // No descontar créditos dos veces
+            return;
         }
 
-        // Descontar créditos solo si no fue banco (porque el banco llama a gen nuevamente)
-        if (!esBanco) {
-            const creditResult = await deductCredits(telegramId, 4);
-            if (creditResult?.creditsZero) await kickUserFromGroup(telegramId);
-        }
+        const creditResult = await deductCredits(telegramId, 4);
+        if (creditResult?.creditsZero) await kickUserFromGroup(telegramId);
     } catch (error) {
         console.error('Error en /gen:', error);
         await sendSafeMessage(chatId, `❌ Error: ${error.message}`);
