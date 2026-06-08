@@ -1,5 +1,5 @@
 // ============================================
-// BOT DE TELEGRAM - VERSIÓN DEFINITIVA MEJORADA
+// BOT DE TELEGRAM - VERSIÓN DEFINITIVA CORREGIDA
 // ============================================
 
 const TelegramBot = require('node-telegram-bot-api');
@@ -41,6 +41,37 @@ const SEPARATORS = [
     '🎀💖🎀💖🎀💖🎀💖🎀💖🎀💖🎀💖🎀💖🎀💖🎀💖',
     '🔮✨🔮✨🔮✨🔮✨🔮✨🔮✨🔮✨🔮✨🔮✨🔮✨'
 ];
+
+// Diccionario local de bins por banco
+const bankBins = {
+    // BBVA / Bancomer
+    bbva: ['415231', '481515', '481514', '481516', '481283'],
+    bancomer: ['415231', '481515', '481514', '481516', '481283'],
+    // Bancoppel
+    bancoppel: ['426807', '416916'],
+    // Santander
+    santander: ['557910', '557907'],
+    // Banamex (Citibanamex)
+    banamex: ['549949', '528843', '554625'],
+    citibanamex: ['549949', '528843', '554625'],
+    // HSBC
+    hsbc: ['491089', '421316'],
+    // Azteca
+    azteca: ['402766'],
+    // Banorte
+    banorte: ['418914', '493173', '493158', '491566']
+};
+
+function getBinForBank(bankName) {
+    const name = bankName.toLowerCase().trim();
+    for (const [key, bins] of Object.entries(bankBins)) {
+        if (name.includes(key)) {
+            const randomIndex = Math.floor(Math.random() * bins.length);
+            return bins[randomIndex];
+        }
+    }
+    return null; // Si no encuentra, devuelve null (no se asigna por defecto)
+}
 
 // ========== GESTIÓN DE ESTADOS ==========
 const userStates = new Map();
@@ -295,7 +326,7 @@ bot.onText(/\/start/, async (msg) => {
     }
 });
 
-// /binlist y alias
+// /binlist y alias (ahora usa el diccionario local)
 bot.onText(/^\/(?:binlist|bins|list|binl|bnl)(?:\s+(.+))?/i, async (msg, match) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
@@ -306,9 +337,21 @@ bot.onText(/^\/(?:binlist|bins|list|binl|bnl)(?:\s+(.+))?/i, async (msg, match) 
     }
     if (!await checkAndKickIfNoDaysOrCredits(telegramId, chatId, 0)) return;
     await sendSafeMessage(chatId, `🔍 Buscando bins para: ${query}...`);
-    // Simulación - reemplazar con API real
-    const binsEjemplo = ['415231', '557910', '554718'];
-    let msgText = `📋 *Bins encontrados para ${query}:*\n\n💳 CRÉDITO/DÉBITO:\n${binsEjemplo.join(', ')}`;
+    
+    const nameKey = query.toLowerCase().trim();
+    let binsEncontrados = [];
+    for (const [key, bins] of Object.entries(bankBins)) {
+        if (nameKey.includes(key)) {
+            binsEncontrados = bins;
+            break;
+        }
+    }
+    if (binsEncontrados.length === 0) {
+        // Si no se encuentra, mostrar bins genéricos de México
+        binsEncontrados = ['415231', '426807', '557910', '549949', '481515'];
+    }
+    const binsUnicos = [...new Set(binsEncontrados)];
+    let msgText = `📋 *Bins encontrados para ${query}:*\n\n💳 Lista de bins:\n${binsUnicos.join(', ')}`;
     await sendSafeMessage(chatId, msgText, { parse_mode: 'Markdown' });
     clearUserState(telegramId);
 });
@@ -323,15 +366,17 @@ bot.onText(/^\/(?:extrapolador|extrapolado|extrapolad|extrapolar|extrapola|extra
         return sendSafeMessage(chatId, '🔢 Envía un BIN de 6 dígitos, nombre de banco o país:');
     }
     if (!await checkAndKickIfNoDaysOrCredits(telegramId, chatId, 10)) return;
+    
     let bin = input;
     if (!/^\d{6}$/.test(input)) {
         await sendSafeMessage(chatId, `🔍 Obteniendo bins de ${input}...`);
-        const bins = ['415231', '557910']; // dummy
-        if (bins.length === 0) return sendSafeMessage(chatId, '❌ No se encontraron bins.');
-        bin = bins[0];
+        const binElegido = getBinForBank(input);
+        if (!binElegido) throw new Error('No se encontraron bins para ese banco');
+        bin = binElegido;
         await sendSafeMessage(chatId, `✅ Usando BIN: ${bin}`);
     }
     await sendSafeMessage(chatId, `🔮 Extrapolando para BIN ${bin}...`);
+    
     try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 60000);
@@ -401,8 +446,7 @@ bot.onText(/^\/(?:extrapolador|extrapolado|extrapolad|extrapolar|extrapola|extra
     clearUserState(telegramId);
 });
 
-// /gen y alias - VERSIÓN SIMPLE Y DEFINITIVA
-// /gen y alias - VERSIÓN SIMPLE Y DEFINITIVA
+// /gen y alias - VERSIÓN CORREGIDA
 bot.onText(/^\/(?:generadorccs|genccs|gen|gncc)(?:\s+(.+))?/i, async (msg, match) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
@@ -413,7 +457,7 @@ bot.onText(/^\/(?:generadorccs|genccs|gen|gncc)(?:\s+(.+))?/i, async (msg, match
     }
     if (!await checkAndKickIfNoDaysOrCredits(telegramId, chatId, 4)) return;
 
-    // Extraer cantidad opcional (un número al final)
+    // Extraer cantidad opcional
     let cantidad = 10;
     let input = fullParam;
     const cantMatch = input.match(/\s+(\d+)$/);
@@ -423,19 +467,16 @@ bot.onText(/^\/(?:generadorccs|genccs|gen|gncc)(?:\s+(.+))?/i, async (msg, match
         input = input.substring(0, cantMatch.index);
     }
 
-    // DETECCIÓN SIMPLE:
+    // Detección simple
     const tieneX = /[Xx]/.test(input);
-    const tieneFecha = /\d{1,2}[\/\-|]\d{2,4}/.test(input); // busca algo como 09/2029 o 09|2029
+    const tieneFecha = /\d{1,2}[\/\-|]\d{2,4}/.test(input);
     const esExtra = tieneX && tieneFecha;
     const esBin = /^\d{6}$/.test(input.trim());
     const esBanco = !esExtra && !esBin;
 
     try {
         if (esExtra) {
-            // ----- EXTRA: generar tarjetas directamente -----
-            // Normalizar: reemplazar espacios, barras, guiones por pipe
             let normalized = input.trim().replace(/[ /-]+/g, '|');
-            // Eliminar pipes duplicados
             normalized = normalized.replace(/\|+/g, '|');
             const partes = normalized.split('|');
             if (partes.length >= 3) {
@@ -450,7 +491,6 @@ bot.onText(/^\/(?:generadorccs|genccs|gen|gncc)(?:\s+(.+))?/i, async (msg, match
             await sendSafeMessage(chatId, `🎴 *Tarjetas generadas (${tarjetas.length}):*\n${lista}${resto}`, { parse_mode: 'Markdown' });
         }
         else if (esBin) {
-            // ----- BIN: extrapolar, mostrar patrones, generar desde el mejor -----
             await sendSafeMessage(chatId, `🔮 Extrapolando BIN ${input}...`);
             const response = await fetch(`${API_EXTRAPOLADOR_URL}/api/search-bin`, {
                 method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ bin: input })
@@ -458,7 +498,6 @@ bot.onText(/^\/(?:generadorccs|genccs|gen|gncc)(?:\s+(.+))?/i, async (msg, match
             const data = await response.json();
             if (!data.success || !data.data || !data.data.length) throw new Error('No se encontraron tarjetas para ese BIN');
 
-            // Extraer patrones
             const patrones = {};
             for (const tarjeta of data.data) {
                 const partes = tarjeta.split('|');
@@ -471,7 +510,6 @@ bot.onText(/^\/(?:generadorccs|genccs|gen|gncc)(?:\s+(.+))?/i, async (msg, match
             }
             if (Object.keys(patrones).length === 0) throw new Error('No se extrajeron patrones');
 
-            // Clasificar
             const items = Object.entries(patrones).map(([p,c]) => ({ patron: p, count: c }));
             const muy = items.filter(i => i.count >= 3).sort((a,b)=>b.count-a.count);
             const mod = items.filter(i => i.count === 2).sort((a,b)=>b.count-a.count);
@@ -481,7 +519,6 @@ bot.onText(/^\/(?:generadorccs|genccs|gen|gncc)(?:\s+(.+))?/i, async (msg, match
             const [prefijo, mes, año] = mejor.patron.split('|');
             const extraElegido = `${prefijo}xxxx|${mes}|${año}|rnd`;
 
-            // Mostrar tabla de patrones
             let mensaje = `=== EXTRAPOLACIÓN COMPLETADA ===\n✅ EXTRA A GENERAR: \`${prefijo}xxxx | ${mes}/${año}\` | (${mejor.count} veces)\n\n`;
             if (muy.length) {
                 mensaje += `🟢 MUY REPETIDOS (${muy.length}):\n`;
@@ -511,20 +548,18 @@ bot.onText(/^\/(?:generadorccs|genccs|gen|gncc)(?:\s+(.+))?/i, async (msg, match
             }
             await sendSafeMessage(chatId, mensaje, { parse_mode: 'Markdown' });
 
-            // Generar tarjetas
             const tarjetas = generarTarjetasDesdePatron(extraElegido, cantidad);
             const lista = tarjetas.slice(0,20).map(t => `\`${t}\``).join('\n');
             const resto = tarjetas.length > 20 ? `\n... y ${tarjetas.length-20} más` : '';
             await sendSafeMessage(chatId, `🎴 *Tarjetas generadas (${tarjetas.length}):*\n${lista}${resto}`, { parse_mode: 'Markdown' });
         }
         else {
-            // ----- BANCO: aquí debes conectar tu API real de binlist (simulación) -----
+            // BANCO
             await sendSafeMessage(chatId, `🔍 Buscando bins de "${input}"...`);
-            // 🔁 Reemplazar con llamada real
-            const binsEjemplo = ['415231', '557910'];
-            const binElegido = binsEjemplo[0];
-            await sendSafeMessage(chatId, `✅ Usando BIN: ${binElegido}. Generando desde BIN...`);
-            // Reenviar como si fuera un BIN
+            const binElegido = getBinForBank(input);
+            if (!binElegido) throw new Error('No se encontraron bins para ese banco');
+            await sendSafeMessage(chatId, `✅ BIN elegido: ${binElegido}`);
+            // Reenviar como BIN
             const fakeMsg = { ...msg, text: `/gen ${binElegido} ${cantidad}` };
             bot.emit('text', fakeMsg);
             return;
@@ -538,6 +573,7 @@ bot.onText(/^\/(?:generadorccs|genccs|gen|gncc)(?:\s+(.+))?/i, async (msg, match
     }
     clearUserState(telegramId);
 });
+
 // /gencookie
 bot.onText(/^\/(?:gencookie|gencuki|genck|gnck)(?:\s+(\w+))?/i, async (msg, match) => {
     const chatId = msg.chat.id;
@@ -587,7 +623,7 @@ bot.onText(/^\/(?:setcookie|setcuki|stck|sck|setck|addcookie|addcuki|addck|dck|a
     clearUserState(telegramId);
 });
 
-// /amazon
+// /amazon (ahora también soporta nombres de banco)
 bot.onText(/^\/(?:amazon|amz)(?:\s+(.+))?/i, async (msg, match) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
@@ -629,11 +665,14 @@ bot.onText(/^\/(?:amazon|amz)(?:\s+(.+))?/i, async (msg, match) => {
     let param = match[1];
     if (!param) {
         setUserState(telegramId, { step: 'awaiting_amazon_cards' });
-        return sendSafeMessage(chatId, '💳 Envía tarjetas, patrón o BIN:');
+        return sendSafeMessage(chatId, '💳 Envía tarjetas, patrón, BIN o nombre de banco:');
     }
+    // Detectar si es nombre de banco (no es bin, no es extra)
     const esBin = /^\d{6}$/.test(param);
     let normalizedParam = normalizarExtra(param);
     const esExtra = normalizedParam.includes('|') && /[0-9X]+\|\d{1,2}\|\d{2,4}/.test(normalizedParam);
+    const esBanco = !esBin && !esExtra;
+    
     try {
         let tarjetas = [];
         if (esBin) {
@@ -675,6 +714,15 @@ bot.onText(/^\/(?:amazon|amz)(?:\s+(.+))?/i, async (msg, match) => {
             tarjetas = generarTarjetasDesdePatron(normalizedParam, 20);
             let lista = `🎴 *Tarjetas generadas (${tarjetas.length}):*\n${tarjetas.slice(0,20).map(t => `\`${t}\``).join('\n')}`;
             await sendSafeMessage(chatId, lista, { parse_mode: 'Markdown' });
+        } else if (esBanco) {
+            // Nombre de banco -> obtener un bin aleatorio y luego extrapolar
+            const binElegido = getBinForBank(param);
+            if (!binElegido) throw new Error('No se encontraron bins para ese banco');
+            await sendSafeMessage(chatId, `🔍 Banco detectado. Usando BIN: ${binElegido}`);
+            // Llamar recursivamente con el BIN
+            const fakeMsg = { ...msg, text: `/amazon ${binElegido}` };
+            bot.emit('text', fakeMsg);
+            return;
         } else {
             tarjetas = limpiarTarjetas(param);
             if (tarjetas.length === 0) throw new Error('No se encontraron tarjetas.');
@@ -791,7 +839,7 @@ bot.onText(/\/menu/, async (msg) => {
 
 bot.onText(/\/help/, async (msg) => {
     await sendSafeMessage(msg.chat.id,
-        `📖 *Comandos:*\n/start\n/gencookie [país]\n/setcookie [cookie]\n/binlist [banco/pais]\n/extrapolador [bin|banco]\n/gen [extra|bin|banco]\n/amazon [extra|bin|tarjetas]\n/amazoncookie\n/lattice [monto]\n/limpiador\n/creditos\n/menu`, { parse_mode: 'Markdown' });
+        `📖 *Comandos:*\n/start\n/gencookie [país]\n/setcookie [cookie]\n/binlist [banco/pais]\n/extrapolador [bin|banco]\n/gen [extra|bin|banco]\n/amazon [extra|bin|tarjetas|banco]\n/amazoncookie\n/lattice [monto]\n/limpiador\n/creditos\n/menu`, { parse_mode: 'Markdown' });
 });
 
 // ========== MANEJO DE RESPUESTAS INTERACTIVAS ==========
@@ -866,7 +914,7 @@ bot.on('callback_query', async (callbackQuery) => {
             case 'menu_extrapolador': respuesta = 'Usa /extrapolador 123456 (10 créditos)'; break;
             case 'menu_gen': respuesta = 'Usa /gen 549949056298xxxx|05|2029'; break;
             case 'menu_limpiador': respuesta = 'Usa /limpiador y luego envía el texto'; break;
-            case 'menu_chk': respuesta = 'Usa /amazon [tarjetas|patrón|BIN]'; break;
+            case 'menu_chk': respuesta = 'Usa /amazon [tarjetas|patrón|BIN|banco]'; break;
             case 'menu_creditos': respuesta = 'Usa /creditos'; break;
             default: respuesta = 'Opción no válida.';
         }
