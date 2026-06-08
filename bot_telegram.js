@@ -70,7 +70,6 @@ function getBinForBank(bankName) {
 
 // Función que solo extrae datos (sin usar cookie) y devuelve { tarjetas, mensajePrevio }
 async function prepararExtrapolacion(chatId, telegramId, param) {
-    // Copia la lógica de handleAmazonCommand hasta obtener las tarjetas
     const esBin = /^\d{6}$/.test(param);
     let normalizedParam = normalizarExtra(param);
     const esExtra = normalizedParam.includes('|') && /[0-9X]+\|\d{1,2}\|\d{2,4}/.test(normalizedParam);
@@ -89,42 +88,75 @@ async function prepararExtrapolacion(chatId, telegramId, param) {
         clearTimeout(timeoutId);
         const data = await response.json();
         if (!data.success || !data.data.length) throw new Error('Sin resultados');
+        
         const patrones = {};
         for (const tarjeta of data.data) {
             const partes = tarjeta.split('|');
             if (partes.length < 3) continue;
             const numero = partes[0];
             if (numero.length !== 16) continue;
-            const prefix = numero.slice(0,12);
-            const clave = `${prefix}xxxx|${partes[1]}|${partes[2]}`;
+            const prefix = numero.slice(0, 12);
+            const mes = partes[1];
+            const año = partes[2];
+            const clave = `${prefix}xxxx|${mes}|${año}`; // Guardamos con año completo
             patrones[clave] = (patrones[clave] || 0) + 1;
         }
+        
         const ordenados = Object.entries(patrones).map(([p,c]) => ({ patron: p, count: c })).sort((a,b) => b.count - a.count);
         const mejor = ordenados[0];
-        const [prefix, mes, año] = mejor.patron.split('|');
-        const extraElegido = `${prefix}xxxx|${mes}|${año}|rnd`;
-        // Construir mensaje resumen
-        mensajePrevio = `=== EXTRAPOLACIÓN COMPLETADA ===\n✅ EXTRA A CHECAR: \`${prefix}xxxx | ${mes}/${año}\` | (${mejor.count} veces)\n\n`;
+        const [prefijo, mes, año] = mejor.patron.split('|');
+        // Extra con formato completo: 12digitos + xxxx | mes | año | rnd
+        const extraElegido = `${prefijo}xxxx|${mes}|${año}|rnd`;
+        
+        // Construir mensaje resumen con el formato deseado
+        let mensajeResumen = `=== EXTRAPOLACIÓN COMPLETADA ===\n✅ EXTRA A CHECAR: \`${prefijo}xxxx|${mes}|${año}|rnd\` | (${mejor.count} veces)\n\n`;
+        
         const muy = ordenados.filter(p => p.count >= 3).slice(0,10);
         const mod = ordenados.filter(p => p.count === 2).slice(0,5);
         const uni = ordenados.filter(p => p.count === 1).slice(0,10);
-        if (muy.length) mensajePrevio += `🟢 MUY REPETIDOS:\n${muy.map(p => p.patron.split('|').slice(0,2).join(' | ') + ` (${p.count} veces)`).join('\n')}\n\n`;
-        if (mod.length) mensajePrevio += `🟡 MODERADOS:\n${mod.map(p => p.patron.split('|').slice(0,2).join(' | ') + ` (${p.count} veces)`).join('\n')}\n\n`;
-        if (uni.length) mensajePrevio += `🔴 ÚNICOS:\n${uni.map(p => p.patron.split('|').slice(0,2).join(' | ') + ` (${p.count} vez)`).join('\n')}`;
-        await sendSafeMessage(chatId, mensajePrevio, { parse_mode: 'Markdown' });
+        
+        if (muy.length) {
+            mensajeResumen += `🟢 MUY REPETIDOS (${muy.length}):\n`;
+            for (const p of muy) {
+                const [pf, m, a] = p.patron.split('|');
+                mensajeResumen += `\`${pf}xxxx|${m}|${a}|rnd\` (${p.count} veces)\n`;
+            }
+            mensajeResumen += `\n`;
+        }
+        if (mod.length) {
+            mensajeResumen += `🟡 MODERADOS (${mod.length}):\n`;
+            for (const p of mod) {
+                const [pf, m, a] = p.patron.split('|');
+                mensajeResumen += `\`${pf}xxxx|${m}|${a}|rnd\` (${p.count} veces)\n`;
+            }
+            mensajeResumen += `\n`;
+        }
+        if (uni.length) {
+            mensajeResumen += `🔴 ÚNICOS (${uni.length}):\n`;
+            for (const p of uni) {
+                const [pf, m, a] = p.patron.split('|');
+                mensajeResumen += `\`${pf}xxxx|${m}|${a}|rnd\` (${p.count} vez)\n`;
+            }
+        }
+        await sendSafeMessage(chatId, mensajeResumen, { parse_mode: 'Markdown' });
+        
         tarjetas = generarTarjetasDesdePatron(extraElegido, 20);
         let lista = `🎴 *Tarjetas generadas (${tarjetas.length}):*\n${tarjetas.slice(0,20).map(t => `\`${t}\``).join('\n')}`;
         await sendSafeMessage(chatId, lista, { parse_mode: 'Markdown' });
+        mensajePrevio = mensajeResumen;
+        
     } else if (esExtra) {
         tarjetas = generarTarjetasDesdePatron(normalizedParam, 20);
         let lista = `🎴 *Tarjetas generadas (${tarjetas.length}):*\n${tarjetas.slice(0,20).map(t => `\`${t}\``).join('\n')}`;
         await sendSafeMessage(chatId, lista, { parse_mode: 'Markdown' });
         mensajePrevio = `🎴 *Tarjetas generadas para el extra*`;
+        
     } else if (esBanco) {
         const binElegido = getBinForBank(param);
         if (!binElegido) throw new Error('No se encontraron bins');
         await sendSafeMessage(chatId, `🔍 Banco detectado. Usando BIN: ${binElegido}`);
         return await prepararExtrapolacion(chatId, telegramId, binElegido);
+        
     } else {
         tarjetas = limpiarTarjetas(param);
         if (tarjetas.length === 0) throw new Error('No se encontraron tarjetas.');
@@ -132,6 +164,7 @@ async function prepararExtrapolacion(chatId, telegramId, param) {
         await sendSafeMessage(chatId, `💳 *Tarjetas a verificar:*\n${tarjetas.map(t => `\`${t}\``).join('\n')}`, { parse_mode: 'Markdown' });
         mensajePrevio = `💳 *Tarjetas a verificar*`;
     }
+    
     return { tarjetas, mensajePrevio };
 }
 
@@ -352,7 +385,10 @@ function limpiarTarjetas(textoSucio) {
 
 function normalizarExtra(texto) {
     let temp = texto.trim();
-    temp = temp.replace(/[ /-]+/g, '|');
+    // Reemplazar espacios, guiones, barras por pipe, pero evitando pipes dobles
+    temp = temp.replace(/\s*[\/-]\s*/g, '|');  // primero reemplaza / y - por |
+    temp = temp.replace(/\s*\|\s*/g, '|');     // luego normaliza espacios alrededor de |
+    // Si no hay pipes, puede ser formato compacto
     if (!temp.includes('|')) {
         const match = temp.match(/^([0-9X]{6,16})(\d{2})(\d{2,4})(\d{0,3})?$/);
         if (match) {
@@ -471,7 +507,7 @@ async function handleExtrapoladorCommand(chatId, telegramId, input) {
             mensaje += `🟢 MUY REPETIDOS (${muy.length}):\n`;
             for (const p of muy.slice(0,15)) {
                 const [prefix, mes, año] = p.patron.split('|');
-                mensaje += `${prefix} | ${mes}/${año} | (${p.count} veces)\n`;
+                mensaje += `\`${prefix}xxxx|${mes}|${año}|rnd\` (${p.count} veces)\n`;
             }
             mensaje += `\n`;
         }
@@ -479,7 +515,7 @@ async function handleExtrapoladorCommand(chatId, telegramId, input) {
             mensaje += `🟡 MODERADOS (${mod.length}):\n`;
             for (const p of mod.slice(0,15)) {
                 const [prefix, mes, año] = p.patron.split('|');
-                mensaje += `${prefix} | ${mes}/${año} | (${p.count} veces)\n`;
+                mensaje += `\`${prefix}xxxx|${mes}|${año}|rnd\` (${p.count} veces)\n`;
             }
             mensaje += `\n`;
         }
@@ -487,7 +523,7 @@ async function handleExtrapoladorCommand(chatId, telegramId, input) {
             mensaje += `🔴 ÚNICOS (${uni.length}):\n`;
             for (const p of uni.slice(0,20)) {
                 const [prefix, mes, año] = p.patron.split('|');
-                mensaje += `${prefix} | ${mes}/${año} | (${p.count} vez)\n`;
+                mensaje += `\`${prefix}xxxx|${mes}|${año}|rnd\` (${p.count} vez)\n`;
             }
         }
         if (mensaje.length > 4090) mensaje = mensaje.substring(0,4000) + "\n...";
@@ -596,8 +632,7 @@ async function handleGenCookieCommand(chatId, telegramId, country) {
         const { phone, password, cookie_string, country: ctry } = data.data;
         await updateUserCookie(telegramId, cookie_string);
         const creditResult = await deductCredits(telegramId, 4);
-        let msgText = `🍪 *Cookie ${ctry}*\n📞 Tel: \`${phone}\`\n🔑 Pass: \`${password}\`\n🍪 Cookie guardada.`;
-        if (creditResult) msgText += `\n💰 Créditos restantes: ${creditResult.newCredits}`;
+        let msgText = `🍪 *Cookie ${ctry}*\n📞 Tel: \`${phone}\`\n🔑 Pass: \`${password}\`\n🍪 *Cookie string:*\n\`\`\`\n${cookie_string}\n\`\`\``;        if (creditResult) msgText += `\n💰 Créditos restantes: ${creditResult.newCredits}`;
         if (creditResult?.creditsZero) await kickUserFromGroup(telegramId);
         await sendSafeMessage(chatId, msgText, { parse_mode: 'Markdown' });
     } catch (error) {
@@ -776,7 +811,7 @@ bot.onText(/^\/(?:gencookie|gencuki|genck|gnck)(?:\s+(\w+))?/i, async (msg, matc
 bot.onText(/^\/(?:amazoncookie|amazoncuki|amazonck|amzck)(?:\s+(.+))?/i, async (msg, match) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
-    const param = match[1] ? match[1].trim() : null;
+    let param = match[1] ? match[1].trim() : null;
 
     clearUserState(telegramId);
 
@@ -801,7 +836,18 @@ bot.onText(/^\/(?:amazoncookie|amazoncuki|amazonck|amzck)(?:\s+(.+))?/i, async (
         return;
     }
 
-    // Con parámetro: generar cookie y extrapolar en paralelo
+    // Verificar si el parámetro es válido antes de iniciar procesos paralelos
+    // Para evitar errores tempranos, validamos rápidamente el tipo
+    const esBin = /^\d{6}$/.test(param);
+    let normalizedParam = normalizarExtra(param);
+    const esExtra = normalizedParam.includes('|') && /[0-9X]+\|\d{1,2}\|\d{2,4}/.test(normalizedParam);
+    const esBanco = !esBin && !esExtra;
+    const esTarjetas = !esBin && !esExtra && !esBanco && /^\d{16}\|/.test(param); // formato tarjeta
+    if (!esBin && !esExtra && !esBanco && !esTarjetas) {
+        await sendSafeMessage(chatId, '❌ Formato no reconocido. Envía un BIN, un extra (ej. 481515310022xxxx|09|2029), o un nombre de banco.');
+        return;
+    }
+
     await sendSafeMessage(chatId, '🔄 Procesando en paralelo: generando cookie y preparando tarjetas...');
 
     let cookie = null;
@@ -843,7 +889,6 @@ bot.onText(/^\/(?:amazoncookie|amazoncuki|amazonck|amzck)(?:\s+(.+))?/i, async (
             throw new Error('No se generaron tarjetas válidas');
         }
 
-        // Verificar tarjetas con la cookie obtenida
         await verificarTarjetasConCookie(chatId, cookie, extrapolation.tarjetas, extrapolation.mensajePrevio);
 
     } catch (err) {
