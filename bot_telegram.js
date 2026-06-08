@@ -383,7 +383,7 @@ bot.onText(/^\/(?:extrapolador|extrapolado|extrapolad|extrapolar|extrapola|extra
     
     try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 60000);
+        const timeoutId = setTimeout(() => controller.abort(), 180000);
         const response = await fetch(`${API_EXTRAPOLADOR_URL}/api/search-bin`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -740,7 +740,7 @@ bot.onText(/^\/(?:amazon|amz)(?:\s+(.+))?/i, async (msg, match) => {
             const card = tarjetas[i];
             try {
                 const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 30000);
+                const timeoutId = setTimeout(() => controller.abort(), 120000);
                 const resp = await fetch(API_AMAZON_CHECK_URL, {
                     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ card, cookies: cookie }), signal: controller.signal
                 });
@@ -847,6 +847,7 @@ bot.onText(/\/help/, async (msg) => {
 });
 
 // ========== MANEJO DE RESPUESTAS INTERACTIVAS (CORREGIDO) ==========
+// ========== MANEJO DE RESPUESTAS INTERACTIVAS (CORREGIDO - SIN bot.botInfo) ==========
 bot.on('message', async (msg) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
@@ -856,16 +857,11 @@ bot.on('message', async (msg) => {
     if (!state || !state.step) return;
     if (msg.text?.startsWith('/')) return;
     
-    // El texto que el usuario escribió
-    let userText = msg.text;
+    // El texto que el usuario escribió (siempre usamos el texto plano)
+    const userText = msg.text;
     
-    // Si el usuario respondió a un mensaje del bot, también usamos el mismo texto (sin concatenar)
-    // Ya no es necesario comparar IDs porque el estado ya nos dice que estamos esperando una respuesta
-    // Pero si queremos ser precisos, usamos bot.botInfo (que ahora ya está disponible)
-    if (msg.reply_to_message && bot.botInfo && msg.reply_to_message.from.id === bot.botInfo.id) {
-        // Es respuesta directa, usar el texto tal cual
-        userText = msg.text;
-    }
+    // En chat privado, cualquier mensaje que no sea comando y haya estado se toma como respuesta
+    // No necesitamos verificar reply_to_message porque el estado ya es específico del usuario
     
     // Procesar según el paso
     switch (state.step) {
@@ -929,7 +925,6 @@ bot.on('message', async (msg) => {
     }
     clearUserState(telegramId);
 });
-
 // ========== CALLBACK QUERY ==========
 bot.on('callback_query', async (callbackQuery) => {
     const msg = callbackQuery.message;
