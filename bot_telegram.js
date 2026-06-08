@@ -36,12 +36,11 @@ bot.getMe().then(me => {
 
 // ========== SEPARADORES BONITOS ==========
 const SEPARATORS = [
-    '𓆝 𓆟 𓆞 𓆝 𓆟𓆝 𓆟 𓆞 𓆝 𓆟𓆝 𓆟 𓆞 𓆝 𓆟𓆝',
-    '⋆｡‧˚ʚɞ˚‧｡⋆⋆｡‧˚ʚɞ˚‧｡⋆⋆｡‧˚ʚɞ˚‧｡⋆⋆｡‧˚ʚɞ˚‧｡⋆⋆｡‧˚ʚ',
-    '𓆩༺✧༻𓆪  𓆩༺✧༻𓆪 𓆩༺✧༻𓆪 𓆩༺✧༻𓆪 𓆩༺✧༻𓆪',
-    '𝄞⨾✮˚.⋆𝄞⨾✮˚.⋆𝄞⨾✮˚.⋆𝄞⨾✮˚.⋆𝄞⨾✮˚.⋆𝄞⨾✮˚',
-    '⋆.ೃ࿔*:･⋆.ೃ࿔*:･⋆.ೃ࿔*:･⋆.ೃ࿔*:･⋆.ೃ࿔*:･',
-    '་༘.ೃ࿔ᥫ᭡.⋆་༘.ೃ࿔ᥫ᭡.⋆་༘.ೃ࿔ᥫ᭡.⋆་༘.ೃ࿔ᥫ᭡.⋆',
+    '﹌﹌﹌﹌﹌﹌﹌﹌' ,
+    '𓆩༺✧༻‧༺✧༻‧༺✧',
+    '₊‿︵‿︵‿︵‿︵',
+    '⋆.ೃ࿔*:･⋆.ೃ࿔*:･⋆.',
+    '་༘.ೃ࿔ᥫ᭡.⋆་༘.ೃ࿔ᥫ᭡.⋆',
 
 ];
 
@@ -762,42 +761,6 @@ bot.onText(/\/start/, async (msg) => {
     }
 });
 
-bot.onText(/^\/(?:binlist|bins|list|binl|bnl)(?:\s+(.+))?/i, async (msg, match) => {
-    const chatId = msg.chat.id;
-    const telegramId = msg.from.id;
-    let query = match[1];
-    if (!query) {
-        setUserState(telegramId, { step: 'awaiting_binlist_query' });
-        return sendSafeMessage(chatId, '🏦 Ingresa el nombre de un banco o país:');
-    }
-    await handleBinlistCommand(chatId, telegramId, query);
-    clearUserState(telegramId);
-});
-
-bot.onText(/^\/(?:extrapolador|extrapolado|extrapolad|extrapolar|extrapola|extrapol|extrapo|extrap|extras|extra|expo|exp|ext|xtr|xtrp|scrapper|scrapp|scrp)(?:\s+(.+))?/i, async (msg, match) => {
-    const chatId = msg.chat.id;
-    const telegramId = msg.from.id;
-    let input = match[1];
-    if (!input) {
-        setUserState(telegramId, { step: 'awaiting_extrapolador_input' });
-        return sendSafeMessage(chatId, '🔢 Envía un BIN de 6 dígitos, nombre de banco o país:');
-    }
-    await handleExtrapoladorCommand(chatId, telegramId, input);
-    clearUserState(telegramId);
-});
-
-bot.onText(/^\/(?:generadorccs|genccs|gen|gncc)(?:\s+(.+))?/i, async (msg, match) => {
-    const chatId = msg.chat.id;
-    const telegramId = msg.from.id;
-    let param = match[1];
-    if (!param) {
-        setUserState(telegramId, { step: 'awaiting_gen_param' });
-        return sendSafeMessage(chatId, '🎴 Envía un extra, BIN o nombre de banco:');
-    }
-    await handleGenCommand(chatId, telegramId, param);
-    clearUserState(telegramId);
-});
-
 bot.onText(/^\/(?:gencookie|gencuki|genck|gnck)(?:\s+(\w+))?/i, async (msg, match) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
@@ -807,30 +770,6 @@ bot.onText(/^\/(?:gencookie|gencuki|genck|gnck)(?:\s+(\w+))?/i, async (msg, matc
         return sendSafeMessage(chatId, '🌎 ¿País? (MX, US, CA, UK, DE, FR, IT, ES, JP, AU, IN)');
     }
     await handleGenCookieCommand(chatId, telegramId, country);
-    clearUserState(telegramId);
-});
-
-bot.onText(/^\/(?:setcookie|setcuki|stck|sck|setck|addcookie|addcuki|addck|dck|ack)(?:\s+(.+))?/i, async (msg, match) => {
-    const chatId = msg.chat.id;
-    const telegramId = msg.from.id;
-    let cookie = match[1];
-    if (!cookie) {
-        setUserState(telegramId, { step: 'awaiting_setcookie' });
-        return sendSafeMessage(chatId, '🍪 Envía la cookie:');
-    }
-    await handleSetCookieCommand(chatId, telegramId, cookie);
-    clearUserState(telegramId);
-});
-
-bot.onText(/^\/(?:amazon|amz)(?:\s+(.+))?/i, async (msg, match) => {
-    const chatId = msg.chat.id;
-    const telegramId = msg.from.id;
-    let param = match[1];
-    if (!param) {
-        setUserState(telegramId, { step: 'awaiting_amazon_cards' });
-        return sendSafeMessage(chatId, '💳 Envía tarjetas, patrón, BIN o nombre de banco:');
-    }
-    await handleAmazonCommand(chatId, telegramId, param);
     clearUserState(telegramId);
 });
 
@@ -911,6 +850,70 @@ bot.onText(/^\/(?:amazoncookie|amazoncuki|amazonck|amzck)(?:\s+(.+))?/i, async (
         await sendSafeMessage(chatId, `❌ Error: ${err.message}`);
     }
 });
+
+bot.onText(/^\/(?:binlist|bins|list|binl|bnl)(?:\s+(.+))?/i, async (msg, match) => {
+    const chatId = msg.chat.id;
+    const telegramId = msg.from.id;
+    let query = match[1];
+    if (!query) {
+        setUserState(telegramId, { step: 'awaiting_binlist_query' });
+        return sendSafeMessage(chatId, '🏦 Ingresa el nombre de un banco o país:');
+    }
+    await handleBinlistCommand(chatId, telegramId, query);
+    clearUserState(telegramId);
+});
+
+bot.onText(/^\/(?:extrapolador|extrapolado|extrapolad|extrapolar|extrapola|extrapol|extrapo|extrap|extras|extra|expo|exp|ext|xtr|xtrp|scrapper|scrapp|scrp)(?:\s+(.+))?/i, async (msg, match) => {
+    const chatId = msg.chat.id;
+    const telegramId = msg.from.id;
+    let input = match[1];
+    if (!input) {
+        setUserState(telegramId, { step: 'awaiting_extrapolador_input' });
+        return sendSafeMessage(chatId, '🔢 Envía un BIN de 6 dígitos, nombre de banco o país:');
+    }
+    await handleExtrapoladorCommand(chatId, telegramId, input);
+    clearUserState(telegramId);
+});
+
+bot.onText(/^\/(?:generadorccs|genccs|gncc|gen\b)(?:\s+(.+))?/i, async (msg, match) => {
+    const chatId = msg.chat.id;
+    const telegramId = msg.from.id;
+    let param = match[1];
+    if (!param) {
+        setUserState(telegramId, { step: 'awaiting_gen_param' });
+        return sendSafeMessage(chatId, '🎴 Envía un extra, BIN o nombre de banco:');
+    }
+    await handleGenCommand(chatId, telegramId, param);
+    clearUserState(telegramId);
+});
+
+
+
+bot.onText(/^\/(?:setcookie|setcuki|stck|sck|setck|addcookie|addcuki|addck|dck|ack)(?:\s+(.+))?/i, async (msg, match) => {
+    const chatId = msg.chat.id;
+    const telegramId = msg.from.id;
+    let cookie = match[1];
+    if (!cookie) {
+        setUserState(telegramId, { step: 'awaiting_setcookie' });
+        return sendSafeMessage(chatId, '🍪 Envía la cookie:');
+    }
+    await handleSetCookieCommand(chatId, telegramId, cookie);
+    clearUserState(telegramId);
+});
+
+bot.onText(/^\/(?:amazon|amz)(?:\s+(.+))?/i, async (msg, match) => {
+    const chatId = msg.chat.id;
+    const telegramId = msg.from.id;
+    let param = match[1];
+    if (!param) {
+        setUserState(telegramId, { step: 'awaiting_amazon_cards' });
+        return sendSafeMessage(chatId, '💳 Envía tarjetas, patrón, BIN o nombre de banco:');
+    }
+    await handleAmazonCommand(chatId, telegramId, param);
+    clearUserState(telegramId);
+});
+
+
 
 bot.onText(/^\/(?:lattice)(?:\s+(.+))?/i, async (msg, match) => {
     const chatId = msg.chat.id;
