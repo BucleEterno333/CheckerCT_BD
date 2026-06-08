@@ -215,19 +215,25 @@ function limpiarTarjetas(textoSucio) {
 }
 
 function normalizarExtra(texto) {
-    // Si ya tiene pipes, devolver igual
-    if (texto.includes('|')) return texto;
-    // Reemplazar espacios, guiones, barras por pipe
-    let temp = texto.replace(/[ /-]+/g, '|');
-    // Si después de reemplazar sigue sin pipes, puede ser un formato compacto
+    let temp = texto.trim();
+    // Reemplazar cualquier separador (espacio, guión, barra, pipe) por pipe
+    temp = temp.replace(/[ /-]+/g, '|');
+    // Si después de reemplazar no hay pipe pero es formato compacto
     if (!temp.includes('|')) {
-        // Buscar patrón: digitos/X + 2 digitos mes + 4 digitos año + 3 dígitos cvv (opcional)
         const match = temp.match(/^([0-9X]{6,16})(\d{2})(\d{2,4})(\d{0,3})?$/);
         if (match) {
             let [, numBase, mes, año, cvv] = match;
             año = año.length === 2 ? '20' + año : año;
             return `${numBase}|${mes}|${año}|${cvv || 'rnd'}`;
         }
+    }
+    // Dividir por pipe y normalizar cada parte
+    const partes = temp.split('|').map(p => p.trim());
+    if (partes.length >= 3) {
+        let [numBase, mes, año, cvv] = partes;
+        mes = mes.padStart(2, '0');
+        año = año.length === 2 ? '20' + año : año;
+        return `${numBase}|${mes}|${año}|${cvv || 'rnd'}`;
     }
     return temp;
 }
@@ -524,7 +530,8 @@ bot.onText(genRegex, async (msg, match) => {
     if (!await checkAndKickIfNoDaysOrCredits(telegramId, chatId, 4)) return;
     
     // Detectar si param es un extra (contiene | y X o dígitos)
-    const esExtra = param.includes('|') && /[0-9X]+\|\d{2}\|\d{2,4}/.test(param);
+    let normalizedParam = normalizarExtra(param);
+    const esExtra = normalizedParam.includes('|') && /[0-9X]+\|\d{1,2}\|\d{2,4}/.test(normalizedParam);
     const esBin = /^\d{6}$/.test(param);
     const esBanco = !esExtra && !esBin;
     
@@ -579,7 +586,7 @@ bot.onText(genRegex, async (msg, match) => {
         } 
         else {
             // Es extra directo
-            patron = param;
+            patron = normalizedParam;
         }
         
         // Paso 3: generar tarjetas
