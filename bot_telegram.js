@@ -202,25 +202,88 @@ function limpiarTarjetas(textoSucio) {
     return [...new Set(tarjetas)];
 }
 
-function generarTarjetasDesdePatron(patron, cantidad = 10) {
-    const partes = patron.split('|');
-    let [numBase, mes, año] = partes;
-    let cvv = partes[3] || 'rnd';
-    mes = mes.padStart(2, '0');
-    año = año.length === 2 ? `20${año}` : año;
-    if (numBase.length !== 16 || !/^[0-9X]+$/.test(numBase)) {
-        throw new Error('El patrón del número debe tener 16 caracteres (dígitos o X)');
+function normalizarExtra(texto) {
+    // Si ya tiene pipes, devolver igual
+    if (texto.includes('|')) return texto;
+    // Reemplazar espacios, guiones, barras por pipe
+    let temp = texto.replace(/[ /-]+/g, '|');
+    // Si después de reemplazar sigue sin pipes, puede ser un formato compacto
+    if (!temp.includes('|')) {
+        // Buscar patrón: digitos/X + 2 digitos mes + 4 digitos año + 3 dígitos cvv (opcional)
+        const match = temp.match(/^([0-9X]{6,16})(\d{2})(\d{2,4})(\d{0,3})?$/);
+        if (match) {
+            let [, numBase, mes, año, cvv] = match;
+            año = año.length === 2 ? '20' + año : año;
+            return `${numBase}|${mes}|${año}|${cvv || 'rnd'}`;
+        }
     }
+    return temp;
+}
+
+function generarTarjetasDesdePatron(patron, cantidad = 10) {
+    // Normalizar el patrón: reemplazar separadores comunes por '|'
+    let normalizado = patron.trim();
+    // Si hay espacios, convertir a pipe
+    normalizado = normalizado.replace(/[ /-]+/g, '|');
+    // Si no hay pipes pero hay formato MMYYYY pegado, separar (ej: 40115405X054092028)
+    if (!normalizado.includes('|') && /[0-9X]{6,16}\d{4,6}/.test(normalizado)) {
+        // Caso: numero + MMYYYY + CVV (opcional)
+        let match = normalizado.match(/^([0-9X]{6,16})(\d{2})(\d{2,4})(\d{0,3})?$/);
+        if (match) {
+            let [, numBase, mes, año, cvv] = match;
+            año = año.length === 2 ? '20' + año : año;
+            normalizado = `${numBase}|${mes}|${año}|${cvv || 'rnd'}`;
+        }
+    }
+
+    const partes = normalizado.split('|');
+    if (partes.length < 3) throw new Error('Formato inválido. Usa: NUMERO|MES|AÑO|CVV (CVV opcional)');
+
+    let [numBase, mes, año, cvv] = partes;
+    
+    // Validar y normalizar mes
+    mes = mes.padStart(2, '0').slice(0, 2);
+    if (isNaN(parseInt(mes)) || parseInt(mes) < 1 || parseInt(mes) > 12) {
+        throw new Error('Mes inválido (01-12)');
+    }
+    
+    // Normalizar año (2 o 4 dígitos)
+    año = año.trim();
+    if (año.length === 2) año = '20' + año;
+    if (año.length !== 4 || isNaN(parseInt(año))) throw new Error('Año inválido (YYYY o YY)');
+    
+    // Completar número base hasta 16 caracteres con X si es necesario
+    numBase = numBase.toUpperCase();
+    if (numBase.length > 16) throw new Error('El número base no puede tener más de 16 caracteres');
+    if (numBase.length < 16) {
+        // Rellenar con X hasta 16
+        numBase = numBase + 'X'.repeat(16 - numBase.length);
+    }
+    // Verificar que solo contenga dígitos o X
+    if (!/^[0-9X]+$/.test(numBase)) throw new Error('El patrón solo puede contener dígitos y X');
+    
     const tarjetas = [];
     for (let i = 0; i < cantidad; i++) {
         let numeroConX = '';
         for (let char of numBase) {
-            numeroConX += char === 'X' ? Math.floor(Math.random() * 10).toString() : char;
+            if (char === 'X') {
+                numeroConX += Math.floor(Math.random() * 10).toString();
+            } else {
+                numeroConX += char;
+            }
         }
+        // Calcular dígito de Luhn para los primeros 15 dígitos
         const primeros15 = numeroConX.slice(0, 15);
         const digitoControl = calcularDigitoLuhn(primeros15);
         const numeroCompleto = primeros15 + digitoControl;
-        const cvvGen = cvv === 'rnd' ? Math.floor(100 + Math.random() * 900).toString() : cvv;
+        
+        let cvvGen = 'rnd';
+        if (cvv && cvv.toLowerCase() !== 'rnd') {
+            cvvGen = cvv.slice(0, 3);
+            if (!/^\d{3}$/.test(cvvGen)) cvvGen = Math.floor(100 + Math.random() * 900).toString();
+        } else {
+            cvvGen = Math.floor(100 + Math.random() * 900).toString();
+        }
         tarjetas.push(`${numeroCompleto}|${mes}|${año}|${cvvGen}`);
     }
     return tarjetas;
@@ -306,49 +369,131 @@ bot.onText(extrapoladorRegex, async (msg, match) => {
     // Si input no es numérico de 6 dígitos, asumimos que es banco/pais -> llamar a binlist primero
     if (!/^\d{6}$/.test(input)) {
         await sendSafeMessage(chatId, `🔍 Obteniendo bins de ${input}...`);
-        // Simular obtener lista de bins (debería llamar a binlist real)
+        // 🔁 Aquí deberías llamar a tu API real de binlist.
+        // Por ahora simulamos con datos de ejemplo.
         const bins = ['415231', '557910']; // dummy
         if (bins.length === 0) return sendSafeMessage(chatId, '❌ No se encontraron bins.');
-        bin = bins[0]; // elegir primero
+        bin = bins[0]; // elegir el primero
         await sendSafeMessage(chatId, `✅ Usando BIN: ${bin}`);
     }
     
     await sendSafeMessage(chatId, `🔮 Extrapolando para BIN ${bin}...`);
+
     try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 30000);
-        const response = await fetch(`${API_EXTRAPOLADOR_URL}/extrapolate`, {
+        const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 segundos
+
+        // ✅ Llamada CORRECTA a la API de extrapolador (Puppeteer)
+        const response = await fetch(`${API_EXTRAPOLADOR_URL}/api/search-bin`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ bin }),
+            body: JSON.stringify({ bin: bin }),
             signal: controller.signal
         });
         clearTimeout(timeoutId);
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`HTTP ${response.status}: ${errorText.substring(0, 100)}`);
+        }
+
         const data = await response.json();
-        if (!data.success || !data.patterns) throw new Error(data.error || 'Sin resultados');
-        
-        // Mostrar patrones agrupados
-        const muy = data.patterns.filter(p => p.count >= 3);
-        const mod = data.patterns.filter(p => p.count === 2);
-        const uni = data.patterns.filter(p => p.count === 1);
-        let msgText = `=== EXTRAPOLADOR - BIN ${bin} ===\n\n`;
-        if (muy.length) msgText += `🟢 MUY REPETIDOS:\n${muy.slice(0,10).map(p => `${p.prefix} | ${p.mes}/${p.año} (${p.count})`).join('\n')}\n\n`;
-        if (mod.length) msgText += `🟡 MODERADOS:\n${mod.slice(0,10).map(p => `${p.prefix} | ${p.mes}/${p.año} (${p.count})`).join('\n')}\n\n`;
-        if (uni.length) msgText += `🔴 ÚNICOS:\n${uni.slice(0,10).map(p => `${p.prefix} | ${p.mes}/${p.año}`).join('\n')}`;
-        if (msgText.length > 4000) msgText = msgText.substring(0, 3900) + '\n... (truncado)';
-        await sendSafeMessage(chatId, msgText, { parse_mode: 'Markdown' });
-        
-        // Descontar créditos
+        if (!data.success || !data.data || data.data.length === 0) {
+            return await sendSafeMessage(chatId, `❌ No se encontraron tarjetas para BIN ${bin}.`);
+        }
+
+        // ===== EXTRAER PATRONES =====
+        const patrones = {};
+        for (const tarjeta of data.data) {
+            const partes = tarjeta.split('|');
+            if (partes.length < 3) continue;
+            const numero = partes[0];
+            const mes = partes[1];
+            const año = partes[2];
+            if (numero.length !== 16) continue;
+            const prefix = numero.slice(0, 12);
+            const clave = `${prefix}xxxx|${mes}|${año}`;
+            patrones[clave] = (patrones[clave] || 0) + 1;
+        }
+
+        if (Object.keys(patrones).length === 0) {
+            return await sendSafeMessage(chatId, '❌ No se pudieron extraer patrones.');
+        }
+
+        // ===== CLASIFICAR =====
+        const muy = [], mod = [], uni = [];
+        for (const [patron, count] of Object.entries(patrones)) {
+            if (count >= 3) muy.push({ patron, count });
+            else if (count === 2) mod.push({ patron, count });
+            else uni.push({ patron, count });
+        }
+        muy.sort((a, b) => b.count - a.count);
+        mod.sort((a, b) => b.count - a.count);
+        uni.sort((a, b) => b.count - a.count);
+
+        // ===== CONSTRUIR MENSAJE =====
+        let mensaje = `=== EXTRAPOLADOR - RESULTADOS ===\n\n`;
+        if (muy.length) {
+            mensaje += `🟢 PATRONES MUY REPETIDOS (${muy.length}):\n==================================================\n`;
+            for (const p of muy.slice(0, 15)) {
+                const [prefix, mes, año] = p.patron.split('|');
+                mensaje += `${prefix} | ${mes}/${año} | (${p.count} veces)\n`;
+            }
+            if (muy.length > 15) mensaje += `... y ${muy.length - 15} más.\n`;
+            mensaje += `\n`;
+        }
+        if (mod.length) {
+            mensaje += `🟡 PATRONES MODERADOS (${mod.length}):\n==================================================\n`;
+            for (const p of mod.slice(0, 15)) {
+                const [prefix, mes, año] = p.patron.split('|');
+                mensaje += `${prefix} | ${mes}/${año} | (${p.count} veces)\n`;
+            }
+            if (mod.length > 15) mensaje += `... y ${mod.length - 15} más.\n`;
+            mensaje += `\n`;
+        }
+        if (uni.length) {
+            mensaje += `🔴 PATRONES ÚNICOS (${uni.length}):\n==================================================\n`;
+            for (const p of uni.slice(0, 20)) {
+                const [prefix, mes, año] = p.patron.split('|');
+                mensaje += `${prefix} | ${mes}/${año} | (${p.count} vez)\n`;
+            }
+            if (uni.length > 20) mensaje += `... y ${uni.length - 20} más.\n`;
+        }
+        if (mensaje.length > 4090) mensaje = mensaje.substring(0, 4000) + "\n... (truncado)";
+
+        await sendSafeMessage(chatId, mensaje, { parse_mode: 'Markdown' });
+
+        // ===== DESCONTAR CRÉDITOS =====
         const creditResult = await deductCredits(telegramId, 10);
         if (creditResult?.creditsZero) {
-            if (GROUP_CHAT_ID) await bot.telegram.kickChatMember(GROUP_CHAT_ID, telegramId).catch(() => {});
-            await sendSafeMessage(chatId, '⚠️ Llegaste a 0 créditos. Has sido expulsado.');
+            await kickUserFromGroup(telegramId);
+            await sendSafeMessage(chatId, '⚠️ Has llegado a 0 créditos. Has sido expulsado del grupo.');
         }
     } catch (error) {
+        console.error(error);
         await sendSafeMessage(chatId, `❌ Error: ${error.message}`);
     }
     clearUserState(telegramId);
 });
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 // ========== COMANDO /GEN (y alias) ==========
 const genRegex = /^\/(?:generadorccs|genccs|gen|gncc)(?:\s+(.+))?/i;
@@ -412,6 +557,8 @@ bot.onText(genRegex, async (msg, match) => {
         
         // Paso 3: generar tarjetas
         const cantidad = 10; // por defecto, se podría pedir
+        patron = normalizarExtra(patron);
+
         const tarjetas = generarTarjetasDesdePatron(patron, cantidad);
         const lista = tarjetas.slice(0, 20).map(t => `\`${t}\``).join('\n');
         await sendSafeMessage(chatId, `🎴 *Tarjetas generadas (${tarjetas.length}):*\n${lista}`, { parse_mode: 'Markdown' });
