@@ -401,193 +401,135 @@ bot.onText(/^\/(?:extrapolador|extrapolado|extrapolad|extrapolar|extrapola|extra
     clearUserState(telegramId);
 });
 
-// /gen y alias - VERSIÓN DEFINITIVA (detecta extras con espacios, soporta cantidad)
+// /gen y alias - VERSIÓN SIMPLE Y DEFINITIVA
 bot.onText(/^\/(?:generadorccs|genccs|gen|gncc)(?:\s+(.+))?/i, async (msg, match) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
     let fullParam = match[1];
     if (!fullParam) {
         setUserState(telegramId, { step: 'awaiting_gen_param' });
-        return sendSafeMessage(chatId, '🎴 Envía un extra, BIN o nombre de banco. Ej: /gen 481515310022xxxx|09|2029 20');
+        return sendSafeMessage(chatId, '🎴 Envía un extra (ej. 481515310022xxxx|09|2029), un BIN de 6 dígitos, o un banco/pais');
     }
     if (!await checkAndKickIfNoDaysOrCredits(telegramId, chatId, 4)) return;
 
-    // Extraer cantidad opcional (un número al final después de un espacio)
+    // 1. Extraer cantidad opcional (un número al final)
     let cantidad = 10;
-    let param = fullParam;
-    const matchCantidad = fullParam.match(/\s+(\d+)$/);
-    if (matchCantidad) {
-        cantidad = parseInt(matchCantidad[1]);
+    let input = fullParam;
+    const cantMatch = input.match(/\s+(\d+)$/);
+    if (cantMatch) {
+        cantidad = parseInt(cantMatch[1]);
         if (cantidad > 50) cantidad = 50;
-        param = fullParam.substring(0, matchCantidad.index);
+        input = input.substring(0, cantMatch.index);
     }
 
-    // Normalizar el patrón completo (convierte espacios, barras, etc., a pipes)
-    let normalizedParam = normalizarExtra(param);
-    
-    // Detectar tipo: extra, bin o banco
-    const esExtra = normalizedParam.includes('|') && /[0-9X]+\|\d{1,2}\|\d{2,4}/.test(normalizedParam);
-    const esBin = /^\d{6}$/.test(param.trim());
+    // 2. Normalizar (cambiar espacios, /, - por |)
+    let normalized = input.trim().replace(/[ /-]+/g, '|');
+
+    // 3. Detección: ¿es un EXTRA? (contiene pipe y patrón de fecha)
+    const esExtra = normalized.includes('|') && /[0-9X]+\|\d{1,2}\|\d{2,4}/.test(normalized);
+    const esBin = /^\d{6}$/.test(input.trim());
     const esBanco = !esExtra && !esBin;
 
     try {
-        if (esBanco) {
-            // ----- BANCO: buscar bins, extrapolar, mostrar tabla y generar -----
-            await sendSafeMessage(chatId, `🔍 Buscando bins de ${param}...`);
-            const bins = ['415231', '557910']; // 🔁 Reemplazar con API real
-            if (bins.length === 0) throw new Error('No se encontraron bins');
-            const binElegido = bins[0];
-            await sendSafeMessage(chatId, `✅ BIN elegido: ${binElegido}`);
-            await sendSafeMessage(chatId, `🔮 Extrapolando desde ${binElegido}...`);
-            
+        if (esExtra) {
+            // --- Extra directo: solo generar tarjetas ---
+            const tarjetas = generarTarjetasDesdePatron(normalized, cantidad);
+            const lista = tarjetas.slice(0,20).map(t => `\`${t}\``).join('\n');
+            const resto = tarjetas.length > 20 ? `\n... y ${tarjetas.length-20} más` : '';
+            await sendSafeMessage(chatId, `🎴 *Tarjetas generadas (${tarjetas.length}):*\n${lista}${resto}`, { parse_mode: 'Markdown' });
+        } 
+        else if (esBin) {
+            // --- BIN: extrapolar, mostrar patrones y generar desde el mejor ---
+            await sendSafeMessage(chatId, `🔮 Extrapolando BIN ${input}...`);
             const response = await fetch(`${API_EXTRAPOLADOR_URL}/api/search-bin`, {
-                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ bin: binElegido })
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ bin: input })
             });
             const data = await response.json();
-            if (!data.success || !data.data || data.data.length === 0) throw new Error('No se pudo extrapolar');
-            
-            // Procesar patrones
+            if (!data.success || !data.data || !data.data.length) throw new Error('No se encontraron tarjetas para ese BIN');
+
+            // Extraer patrones
             const patrones = {};
             for (const tarjeta of data.data) {
                 const partes = tarjeta.split('|');
                 if (partes.length < 3) continue;
-                const numero = partes[0];
-                if (numero.length !== 16) continue;
-                const prefix = numero.slice(0,12);
-                const clave = `${prefix}xxxx|${partes[1]}|${partes[2]}`;
+                const num = partes[0];
+                if (num.length !== 16) continue;
+                const pref = num.slice(0,12);
+                const clave = `${pref}xxxx|${partes[1]}|${partes[2]}`;
                 patrones[clave] = (patrones[clave] || 0) + 1;
             }
             if (Object.keys(patrones).length === 0) throw new Error('No se extrajeron patrones');
-            
-            // Clasificar y elegir el mejor
+
+            // Ordenar por frecuencia
             const items = Object.entries(patrones).map(([p,c]) => ({ patron: p, count: c }));
-            const muy = items.filter(p => p.count >= 3).sort((a,b) => b.count - a.count);
-            const mod = items.filter(p => p.count === 2).sort((a,b) => b.count - a.count);
-            const uni = items.filter(p => p.count === 1).sort((a,b) => b.count - a.count);
-            let mejor = muy[0] || mod[0] || uni[0];
-            if (!mejor) throw new Error('No se encontró patrón');
-            const [prefix, mes, año] = mejor.patron.split('|');
-            const extraElegido = `${prefix}xxxx|${mes}|${año}|rnd`;
-            
-            // Mostrar tabla
-            let mensaje = `=== EXTRAPOLACIÓN COMPLETADA ===\n✅ EXTRA A GENERAR: \`${prefix}xxxx | ${mes}/${año}\` | (${mejor.count} veces)\n\n`;
+            const muy = items.filter(i => i.count >= 3).sort((a,b)=>b.count-a.count);
+            const mod = items.filter(i => i.count === 2).sort((a,b)=>b.count-a.count);
+            const uni = items.filter(i => i.count === 1).sort((a,b)=>b.count-a.count);
+            const mejor = muy[0] || mod[0] || uni[0];
+            if (!mejor) throw new Error('No se encontró ningún patrón');
+            const [prefijo, mes, año] = mejor.patron.split('|');
+            const extraElegido = `${prefijo}xxxx|${mes}|${año}|rnd`;
+
+            // Mostrar resumen de patrones
+            let mensaje = `=== EXTRAPOLACIÓN COMPLETADA ===\n✅ EXTRA A GENERAR: \`${prefijo}xxxx | ${mes}/${año}\` | (${mejor.count} veces)\n\n`;
             if (muy.length) {
                 mensaje += `🟢 MUY REPETIDOS (${muy.length}):\n`;
-                for (const p of muy.slice(0,10)) {
+                for (let p of muy.slice(0,10)) {
                     const [pf, m, a] = p.patron.split('|');
                     mensaje += `${pf}xxxx | ${m}/${a} | (${p.count} veces)\n`;
                 }
-                if (muy.length > 10) mensaje += `... y ${muy.length-10} más.\n`;
+                if (muy.length>10) mensaje += `... y ${muy.length-10} más.\n`;
                 mensaje += `\n`;
             }
             if (mod.length) {
                 mensaje += `🟡 MODERADOS (${mod.length}):\n`;
-                for (const p of mod.slice(0,5)) {
+                for (let p of mod.slice(0,5)) {
                     const [pf, m, a] = p.patron.split('|');
                     mensaje += `${pf}xxxx | ${m}/${a} | (${p.count} veces)\n`;
                 }
-                if (mod.length > 5) mensaje += `... y ${mod.length-5} más.\n`;
+                if (mod.length>5) mensaje += `... y ${mod.length-5} más.\n`;
                 mensaje += `\n`;
             }
             if (uni.length) {
                 mensaje += `🔴 ÚNICOS (${uni.length}):\n`;
-                for (const p of uni.slice(0,10)) {
+                for (let p of uni.slice(0,10)) {
                     const [pf, m, a] = p.patron.split('|');
                     mensaje += `${pf}xxxx | ${m}/${a} | (${p.count} vez)\n`;
                 }
-                if (uni.length > 10) mensaje += `... y ${uni.length-10} más.\n`;
+                if (uni.length>10) mensaje += `... y ${uni.length-10} más.\n`;
             }
             await sendSafeMessage(chatId, mensaje, { parse_mode: 'Markdown' });
-            
-            // Generar tarjetas
+
+            // Generar tarjetas del mejor patrón
             const tarjetas = generarTarjetasDesdePatron(extraElegido, cantidad);
             const lista = tarjetas.slice(0,20).map(t => `\`${t}\``).join('\n');
             const resto = tarjetas.length > 20 ? `\n... y ${tarjetas.length-20} más` : '';
             await sendSafeMessage(chatId, `🎴 *Tarjetas generadas (${tarjetas.length}):*\n${lista}${resto}`, { parse_mode: 'Markdown' });
-            
-        } else if (esBin) {
-            // ----- BIN: extrapolar, mostrar tabla y generar -----
-            await sendSafeMessage(chatId, `🔮 Extrapolando desde BIN ${param}...`);
-            const response = await fetch(`${API_EXTRAPOLADOR_URL}/api/search-bin`, {
-                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ bin: param })
-            });
-            const data = await response.json();
-            if (!data.success || !data.data || data.data.length === 0) throw new Error('No se pudo extrapolar');
-            
-            const patrones = {};
-            for (const tarjeta of data.data) {
-                const partes = tarjeta.split('|');
-                if (partes.length < 3) continue;
-                const numero = partes[0];
-                if (numero.length !== 16) continue;
-                const prefix = numero.slice(0,12);
-                const clave = `${prefix}xxxx|${partes[1]}|${partes[2]}`;
-                patrones[clave] = (patrones[clave] || 0) + 1;
-            }
-            if (Object.keys(patrones).length === 0) throw new Error('No se extrajeron patrones');
-            
-            const items = Object.entries(patrones).map(([p,c]) => ({ patron: p, count: c }));
-            const muy = items.filter(p => p.count >= 3).sort((a,b) => b.count - a.count);
-            const mod = items.filter(p => p.count === 2).sort((a,b) => b.count - a.count);
-            const uni = items.filter(p => p.count === 1).sort((a,b) => b.count - a.count);
-            let mejor = muy[0] || mod[0] || uni[0];
-            if (!mejor) throw new Error('No se encontró patrón');
-            const [prefix, mes, año] = mejor.patron.split('|');
-            const extraElegido = `${prefix}xxxx|${mes}|${año}|rnd`;
-            
-            let mensaje = `=== EXTRAPOLACIÓN COMPLETADA ===\n✅ EXTRA A GENERAR: \`${prefix}xxxx | ${mes}/${año}\` | (${mejor.count} veces)\n\n`;
-            if (muy.length) {
-                mensaje += `🟢 MUY REPETIDOS (${muy.length}):\n`;
-                for (const p of muy.slice(0,10)) {
-                    const [pf, m, a] = p.patron.split('|');
-                    mensaje += `${pf}xxxx | ${m}/${a} | (${p.count} veces)\n`;
-                }
-                if (muy.length > 10) mensaje += `... y ${muy.length-10} más.\n`;
-                mensaje += `\n`;
-            }
-            if (mod.length) {
-                mensaje += `🟡 MODERADOS (${mod.length}):\n`;
-                for (const p of mod.slice(0,5)) {
-                    const [pf, m, a] = p.patron.split('|');
-                    mensaje += `${pf}xxxx | ${m}/${a} | (${p.count} veces)\n`;
-                }
-                if (mod.length > 5) mensaje += `... y ${mod.length-5} más.\n`;
-                mensaje += `\n`;
-            }
-            if (uni.length) {
-                mensaje += `🔴 ÚNICOS (${uni.length}):\n`;
-                for (const p of uni.slice(0,10)) {
-                    const [pf, m, a] = p.patron.split('|');
-                    mensaje += `${pf}xxxx | ${m}/${a} | (${p.count} vez)\n`;
-                }
-                if (uni.length > 10) mensaje += `... y ${uni.length-10} más.\n`;
-            }
-            await sendSafeMessage(chatId, mensaje, { parse_mode: 'Markdown' });
-            
-            const tarjetas = generarTarjetasDesdePatron(extraElegido, cantidad);
-            const lista = tarjetas.slice(0,20).map(t => `\`${t}\``).join('\n');
-            const resto = tarjetas.length > 20 ? `\n... y ${tarjetas.length-20} más` : '';
-            await sendSafeMessage(chatId, `🎴 *Tarjetas generadas (${tarjetas.length}):*\n${lista}${resto}`, { parse_mode: 'Markdown' });
-            
-        } else if (esExtra) {
-            // ----- EXTRA DIRECTO: solo generar (sin tabla) -----
-            const tarjetas = generarTarjetasDesdePatron(normalizedParam, cantidad);
-            const lista = tarjetas.slice(0,20).map(t => `\`${t}\``).join('\n');
-            const resto = tarjetas.length > 20 ? `\n... y ${tarjetas.length-20} más` : '';
-            await sendSafeMessage(chatId, `🎴 *Tarjetas generadas (${tarjetas.length}):*\n${lista}${resto}`, { parse_mode: 'Markdown' });
-        } else {
-            throw new Error('Formato no reconocido. Usa: /gen BIN, /gen "481515310022xxxx|09|2029", o /gen banco');
         }
-        
-        const creditResult = await deductCredits(telegramId, 4);
-        if (creditResult?.creditsZero) await kickUserFromGroup(telegramId);
+        else {
+            // --- BANCO: aquí llamarías a tu API real de binlist (simulación) ---
+            await sendSafeMessage(chatId, `🔍 Buscando bins de "${input}"...`);
+            // Simulación: usa un bin por defecto (debes conectar tu API real)
+            const binsEjemplo = ['415231', '557910'];
+            const binElegido = binsEjemplo[0];
+            await sendSafeMessage(chatId, `✅ Usando BIN: ${binElegido}`);
+            // Ahora tratar como si fuera un BIN
+            const fakeMsg = { ...msg, text: `/gen ${binElegido} ${cantidad}` };
+            bot.emit('text', fakeMsg);
+            return; // No descontar créditos dos veces
+        }
+
+        // Descontar créditos solo si no fue banco (porque el banco llama a gen nuevamente)
+        if (!esBanco) {
+            const creditResult = await deductCredits(telegramId, 4);
+            if (creditResult?.creditsZero) await kickUserFromGroup(telegramId);
+        }
     } catch (error) {
         console.error('Error en /gen:', error);
         await sendSafeMessage(chatId, `❌ Error: ${error.message}`);
     }
     clearUserState(telegramId);
 });
-
 // /gencookie
 bot.onText(/^\/(?:gencookie|gencuki|genck|gnck)(?:\s+(\w+))?/i, async (msg, match) => {
     const chatId = msg.chat.id;
