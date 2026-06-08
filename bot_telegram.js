@@ -28,6 +28,12 @@ const GROUP_CHAT_ID = process.env.GROUP_CHAT_ID;
 const bot = new TelegramBot(token, { polling: true });
 console.log('🤖 Bot de Telegram mejorado iniciado');
 
+// Obtener información del bot al inicio (para saber su ID)
+bot.getMe().then(me => {
+    bot.botInfo = me;
+    console.log(`✅ Bot identificado como: @${me.username} (ID: ${me.id})`);
+}).catch(err => console.error('❌ Error obteniendo info del bot:', err));
+
 // ========== SEPARADORES BONITOS ==========
 const SEPARATORS = [
     '𓆝 𓆟 𓆞 𓆝 𓆟𓆝 𓆟 𓆞 𓆝 𓆟𓆝 𓆟 𓆞 𓆝 𓆟𓆝 𓆟 𓆞 𓆝 𓆟',
@@ -37,8 +43,6 @@ const SEPARATORS = [
     '🪼⋆.ೃ࿔*:･🪼⋆.ೃ࿔*:･🪼⋆.ೃ࿔*:･🪼⋆.ೃ࿔*:･🪼⋆.ೃ࿔*:･🪼⋆.ೃ࿔*:･🪼⋆.ೃ࿔*:･',
     'ᥫ᭡.🍥⋆🐇་༘🌷.ೃ࿔ᥫ᭡.🍥⋆🐇་༘🌷.ೃ࿔ᥫ᭡.🍥⋆🐇་༘🌷.ೃ࿔ᥫ᭡.🍥⋆🐇་༘🌷.ೃ࿔',
     '✨🌟⭐✨🌟⭐✨🌟⭐✨🌟⭐✨🌟⭐✨🌟⭐✨🌟⭐',
-    '🌸🌼🌻🌸🌼🌻🌸🌼🌻🌸🌼🌻🌸🌼🌻🌸🌼🌻🌸🌼🌻',
-    '🎀💖🎀💖🎀💖🎀💖🎀💖🎀💖🎀💖🎀💖🎀💖🎀💖',
     '🔮✨🔮✨🔮✨🔮✨🔮✨🔮✨🔮✨🔮✨🔮✨🔮✨'
 ];
 
@@ -842,50 +846,86 @@ bot.onText(/\/help/, async (msg) => {
         `📖 *Comandos:*\n/start\n/gencookie [país]\n/setcookie [cookie]\n/binlist [banco/pais]\n/extrapolador [bin|banco]\n/gen [extra|bin|banco]\n/amazon [extra|bin|tarjetas|banco]\n/amazoncookie\n/lattice [monto]\n/limpiador\n/creditos\n/menu`, { parse_mode: 'Markdown' });
 });
 
-// ========== MANEJO DE RESPUESTAS INTERACTIVAS ==========
+// ========== MANEJO DE RESPUESTAS INTERACTIVAS (CORREGIDO) ==========
 bot.on('message', async (msg) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
     const state = userStates.get(telegramId);
+    
+    // Si no hay estado activo o el mensaje es un comando, ignorar
     if (!state || !state.step) return;
     if (msg.text?.startsWith('/')) return;
-    let inputText = msg.text;
-    // Verificar que bot.botInfo exista antes de usarlo
+    
+    // El texto que el usuario escribió
+    let userText = msg.text;
+    
+    // Si el usuario respondió a un mensaje del bot, también usamos el mismo texto (sin concatenar)
+    // Ya no es necesario comparar IDs porque el estado ya nos dice que estamos esperando una respuesta
+    // Pero si queremos ser precisos, usamos bot.botInfo (que ahora ya está disponible)
     if (msg.reply_to_message && bot.botInfo && msg.reply_to_message.from.id === bot.botInfo.id) {
-        // Si responde a un mensaje del bot, usar solo la respuesta (sin concatenar)
-        inputText = msg.text;
+        // Es respuesta directa, usar el texto tal cual
+        userText = msg.text;
     }
     
+    // Procesar según el paso
     switch (state.step) {
-        case 'awaiting_binlist_query': bot.emit('text', { ...msg, text: `/binlist ${inputText}` }); break;
-        case 'awaiting_extrapolador_input': bot.emit('text', { ...msg, text: `/extrapolador ${inputText}` }); break;
-        case 'awaiting_gen_param': bot.emit('text', { ...msg, text: `/gen ${inputText}` }); break;
-        case 'awaiting_gencookie_country': bot.emit('text', { ...msg, text: `/gencookie ${inputText}` }); break;
-        case 'awaiting_setcookie': bot.emit('text', { ...msg, text: `/setcookie ${inputText}` }); break;
-        case 'awaiting_amazon_cards': bot.emit('text', { ...msg, text: `/amazon ${inputText}` }); break;
-        case 'awaiting_lattice_amount': bot.emit('text', { ...msg, text: `/lattice ${inputText}` }); break;
+        case 'awaiting_binlist_query':
+            bot.emit('text', { ...msg, text: `/binlist ${userText}` });
+            break;
+        case 'awaiting_extrapolador_input':
+            bot.emit('text', { ...msg, text: `/extrapolador ${userText}` });
+            break;
+        case 'awaiting_gen_param':
+            bot.emit('text', { ...msg, text: `/gen ${userText}` });
+            break;
+        case 'awaiting_gencookie_country':
+            bot.emit('text', { ...msg, text: `/gencookie ${userText}` });
+            break;
+        case 'awaiting_setcookie':
+            bot.emit('text', { ...msg, text: `/setcookie ${userText}` });
+            break;
+        case 'awaiting_amazon_cards':
+            bot.emit('text', { ...msg, text: `/amazon ${userText}` });
+            break;
+        case 'awaiting_lattice_amount':
+            bot.emit('text', { ...msg, text: `/lattice ${userText}` });
+            break;
         case 'awaiting_lattice_cards': {
             const amount = state.data.amount;
-            const tarjetas = limpiarTarjetas(inputText);
-            if (tarjetas.length === 0) return sendSafeMessage(chatId, '❌ No se encontraron tarjetas.');
+            const tarjetas = limpiarTarjetas(userText);
+            if (tarjetas.length === 0) {
+                await sendSafeMessage(chatId, '❌ No se encontraron tarjetas válidas.');
+                break;
+            }
             await sendSafeMessage(chatId, `🔍 Verificando ${tarjetas.length} tarjetas con Lattice ($${amount})...`);
             try {
                 const resultados = [];
                 for (const card of tarjetas.slice(0,10)) {
-                    const resp = await fetch(API_LATTICE_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ card, amount }) });
+                    const resp = await fetch(API_LATTICE_URL, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ card, amount })
+                    });
                     const data = await resp.json();
                     resultados.push({ card, status: data.status });
                 }
                 const separador = SEPARATORS[Math.floor(Math.random() * SEPARATORS.length)];
                 let resumen = `${separador}\n`;
-                for (const r of resultados) resumen += `• Card: ${r.card}\n• Status: ${r.status}\n${separador}\n`;
+                for (const r of resultados) {
+                    resumen += `• Card: ${r.card}\n• Status: ${r.status}\n${separador}\n`;
+                }
                 await sendSafeMessage(chatId, resumen);
                 await deductCredits(telegramId, 1);
-            } catch (err) { await sendSafeMessage(chatId, `❌ Error: ${err.message}`); }
+            } catch (err) {
+                await sendSafeMessage(chatId, `❌ Error: ${err.message}`);
+            }
             break;
         }
-        case 'awaiting_limpiador': bot.emit('text', { ...msg, text: `/limpiador ${inputText}` }); break;
-        default: break;
+        case 'awaiting_limpiador':
+            bot.emit('text', { ...msg, text: `/limpiador ${userText}` });
+            break;
+        default:
+            break;
     }
     clearUserState(telegramId);
 });
