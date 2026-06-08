@@ -854,6 +854,11 @@ bot.on('message', async (msg) => {
     const telegramId = msg.from.id;
     const state = userStates.get(telegramId);
 
+
+    // 🔍 LOG para depurar (esto es lo que querías agregar)
+    console.log(`📩 Mensaje de ${telegramId}: "${msg.text}" - Estado actual: ${state?.step || 'ninguno'}`);
+
+
     // Solo responder si hay un estado activo y el mensaje NO es un comando
     if (!state || !state.step) return;
     if (msg.text?.startsWith('/')) return;
