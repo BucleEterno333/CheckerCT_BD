@@ -266,7 +266,9 @@ function generarTarjetasDesdePatron(patron, cantidad = 10) {
     
     // Completar número base hasta 16 caracteres con X si es necesario
     numBase = numBase.toUpperCase();
-    if (numBase.length > 16) throw new Error('El número base no puede tener más de 16 caracteres');
+    if (numBase.length > 16) {
+        numBase = numBase.substring(0, 16);  // trunca a 16
+    }
     if (numBase.length < 16) {
         // Rellenar con X hasta 16
         numBase = numBase + 'X'.repeat(16 - numBase.length);
@@ -746,8 +748,9 @@ bot.onText(amazonRegex, async (msg, match) => {
     }
 
     const esBin = /^\d{6}$/.test(param);
-    const esExtra = param.includes('|') && /[0-9X]+\|\d{2}\|\d{2,4}/.test(param);
-    
+    let normalizedParam = normalizarExtra(param);
+    // Regex más flexible: mes (1-2 dígitos), año (2-4 dígitos)
+    const esExtra = normalizedParam.includes('|') && /[0-9X]+\|\d{1,2}\|\d{2,4}/.test(normalizedParam);
     try {
         let tarjetas = [];
         let patronElegido = null;
@@ -856,15 +859,15 @@ bot.onText(amazonRegex, async (msg, match) => {
 
         } 
         else if (esExtra) {
-            // Si ya es un extra, generar directamente
-            tarjetas = generarTarjetasDesdePatron(param, 20);
+            // Usar el patrón ya normalizado
+            tarjetas = generarTarjetasDesdePatron(normalizedParam, 20);
             if (tarjetas.length === 0) throw new Error('No se generaron tarjetas.');
             let listaTarjetas = `🎴 *Tarjetas generadas (${tarjetas.length}) para el extra:*\n`;
             for (let i = 0; i < Math.min(tarjetas.length, 20); i++) {
                 listaTarjetas += `\`${tarjetas[i]}\`\n`;
             }
             await sendSafeMessage(chatId, listaTarjetas, { parse_mode: 'Markdown' });
-        } 
+        }
         else {
             // Limpiar texto sucio
             tarjetas = limpiarTarjetas(param);
