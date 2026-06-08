@@ -850,7 +850,10 @@ bot.on('message', async (msg) => {
     if (!state || !state.step) return;
     if (msg.text?.startsWith('/')) return;
     let inputText = msg.text;
-    if (msg.reply_to_message && msg.reply_to_message.from.id === bot.botInfo.id) inputText = msg.reply_to_message.text + ' ' + msg.text;
+    if (msg.reply_to_message && msg.reply_to_message.from.id === bot.botInfo.id) {
+        inputText = msg.text;
+    }
+    
     switch (state.step) {
         case 'awaiting_binlist_query': bot.emit('text', { ...msg, text: `/binlist ${inputText}` }); break;
         case 'awaiting_extrapolador_input': bot.emit('text', { ...msg, text: `/extrapolador ${inputText}` }); break;
