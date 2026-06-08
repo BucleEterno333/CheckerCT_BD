@@ -119,7 +119,7 @@ async function updateUserCookie(telegramId, cookie) {
 async function deductCredits(telegramId, amount = 4) {
     try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 180000);
+        const timeoutId = setTimeout(() => controller.abort(), 300000);
         const response = await fetch(`${INTERNAL_API_URL}/user/bot/use-credits`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -381,7 +381,7 @@ bot.onText(extrapoladorRegex, async (msg, match) => {
 
     try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 180000); // 60 segundos
+        const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minutos
 
         // ✅ Llamada CORRECTA a la API de extrapolador (Puppeteer)
         const response = await fetch(`${API_EXTRAPOLADOR_URL}/api/search-bin`, {
@@ -650,7 +650,7 @@ async function verificarTarjetasAmazonConCookie(tarjetas, cookie, chatId, telegr
     for (const card of tarjetas) {
         try {
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 180000);
+            const timeoutId = setTimeout(() => controller.abort(), 300000);
             const response = await fetch(API_AMAZON_CHECK_URL, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -732,7 +732,7 @@ bot.onText(amazonRegex, async (msg, match) => {
             // 1. Obtener datos del extrapolador
             await sendSafeMessage(chatId, `🔮 Extrapolando desde BIN ${param}...`);
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 60000);
+            const timeoutId = setTimeout(() => controller.abort(), 300000);
             const response = await fetch(`${API_EXTRAPOLADOR_URL}/api/search-bin`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -856,7 +856,7 @@ bot.onText(amazonRegex, async (msg, match) => {
             const card = tarjetas[i];
             try {
                 const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 30000);
+                const timeoutId = setTimeout(() => controller.abort(), 300000);
                 const resp = await fetch(`https://p01--amazonchk--vwr6mdxp7dhn.code.run/api/check-card`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
