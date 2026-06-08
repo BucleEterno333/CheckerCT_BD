@@ -80,6 +80,9 @@ function getBinForBank(bankName) {
 // ========== GESTIÓN DE ESTADOS ==========
 const userStates = new Map();
 
+
+
+
 function setUserState(telegramId, state) {
     if (userStates.has(telegramId)) clearTimeout(userStates.get(telegramId).timeout);
     const timeout = setTimeout(() => {
@@ -95,6 +98,160 @@ function clearUserState(telegramId) {
     const state = userStates.get(telegramId);
     if (state?.timeout) clearTimeout(state.timeout);
     userStates.delete(telegramId);
+}
+
+
+// ========== FUNCIONES AUXILIARES PARA REUTILIZAR COMANDOS ==========
+async function handleBinlistCommand(chatId, telegramId, query) {
+    if (!await checkAndKickIfNoDaysOrCredits(telegramId, chatId, 0)) return;
+    await sendSafeMessage(chatId, `🔍 Buscando bins para: ${query}...`);
+    const nameKey = query.toLowerCase().trim();
+    let binsEncontrados = [];
+    for (const [key, bins] of Object.entries(bankBins)) {
+        if (nameKey.includes(key)) {
+            binsEncontrados = bins;
+            break;
+        }
+    }
+    if (binsEncontrados.length === 0) {
+        binsEncontrados = ['415231', '426807', '557910', '549949', '481515'];
+    }
+    const binsUnicos = [...new Set(binsEncontrados)];
+    let msgText = `📋 *Bins encontrados para ${query}:*\n\n💳 Lista de bins:\n${binsUnicos.join(', ')}`;
+    await sendSafeMessage(chatId, msgText, { parse_mode: 'Markdown' });
+}
+
+// Función completa para procesar /extrapolador
+async function handleExtrapoladorCommand(chatId, telegramId, input) {
+    if (!await checkAndKickIfNoDaysOrCredits(telegramId, chatId, 10)) return;
+
+    let bin = input;
+    if (!/^\d{6}$/.test(input)) {
+        await sendSafeMessage(chatId, `🔍 Obteniendo bins de ${input}...`);
+        const binElegido = getBinForBank(input);
+        if (!binElegido) {
+            await sendSafeMessage(chatId, '❌ No se encontraron bins para ese banco');
+            return;
+        }
+        bin = binElegido;
+        await sendSafeMessage(chatId, `✅ Usando BIN: ${bin}`);
+    }
+    await sendSafeMessage(chatId, `🔮 Extrapolando para BIN ${bin}...`);
+
+    try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 180000); // 3 minutos
+        const response = await fetch(`${API_EXTRAPOLADOR_URL}/api/search-bin`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ bin }),
+            signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`HTTP ${response.status}: ${errorText.substring(0, 100)}`);
+        }
+
+        const data = await response.json();
+        if (!data.success || !data.data || data.data.length === 0) {
+            await sendSafeMessage(chatId, `❌ No se encontraron tarjetas para BIN ${bin}.`);
+            return;
+        }
+
+        // Extraer patrones
+        const patrones = {};
+        for (const tarjeta of data.data) {
+            const partes = tarjeta.split('|');
+            if (partes.length < 3) continue;
+            const numero = partes[0];
+            const mes = partes[1];
+            const año = partes[2];
+            if (numero.length !== 16) continue;
+            const prefix = numero.slice(0, 12);
+            const clave = `${prefix}xxxx|${mes}|${año}`;
+            patrones[clave] = (patrones[clave] || 0) + 1;
+        }
+
+        if (Object.keys(patrones).length === 0) {
+            await sendSafeMessage(chatId, '❌ No se pudieron extraer patrones.');
+            return;
+        }
+
+        // Clasificar
+        const muy = [], mod = [], uni = [];
+        for (const [patron, count] of Object.entries(patrones)) {
+            if (count >= 3) muy.push({ patron, count });
+            else if (count === 2) mod.push({ patron, count });
+            else uni.push({ patron, count });
+        }
+        muy.sort((a, b) => b.count - a.count);
+        mod.sort((a, b) => b.count - a.count);
+        uni.sort((a, b) => b.count - a.count);
+
+        // Construir mensaje
+        let mensaje = `=== EXTRAPOLADOR - RESULTADOS ===\n\n`;
+        if (muy.length) {
+            mensaje += `🟢 MUY REPETIDOS (${muy.length}):\n`;
+            for (const p of muy.slice(0, 15)) {
+                const [prefix, mes, año] = p.patron.split('|');
+                mensaje += `${prefix} | ${mes}/${año} | (${p.count} veces)\n`;
+            }
+            mensaje += `\n`;
+        }
+        if (mod.length) {
+            mensaje += `🟡 MODERADOS (${mod.length}):\n`;
+            for (const p of mod.slice(0, 15)) {
+                const [prefix, mes, año] = p.patron.split('|');
+                mensaje += `${prefix} | ${mes}/${año} | (${p.count} veces)\n`;
+            }
+            mensaje += `\n`;
+        }
+        if (uni.length) {
+            mensaje += `🔴 ÚNICOS (${uni.length}):\n`;
+            for (const p of uni.slice(0, 20)) {
+                const [prefix, mes, año] = p.patron.split('|');
+                mensaje += `${prefix} | ${mes}/${año} | (${p.count} vez)\n`;
+            }
+        }
+        if (mensaje.length > 4090) mensaje = mensaje.substring(0, 4000) + "\n...";
+        await sendSafeMessage(chatId, mensaje, { parse_mode: 'Markdown' });
+
+        // Descontar créditos
+        const creditResult = await deductCredits(telegramId, 10);
+        if (creditResult?.creditsZero) await kickUserFromGroup(telegramId);
+    } catch (error) {
+        console.error('Error en extrapolador:', error);
+        let errorMsg = error.message;
+        if (error.name === 'AbortError') errorMsg = '⏰ Tiempo de espera agotado (3 minutos). El servidor de extrapolador no respondió.';
+        await sendSafeMessage(chatId, `❌ Error: ${errorMsg}`);
+    }
+}
+
+async function handleGenCommand(chatId, telegramId, input) {
+    const fakeMsg = { chat: { id: chatId }, from: { id: telegramId }, text: `/gen ${input}` };
+    bot.emit('text', fakeMsg);
+}
+
+async function handleGenCookieCommand(chatId, telegramId, country) {
+    const fakeMsg = { chat: { id: chatId }, from: { id: telegramId }, text: `/gencookie ${country}` };
+    bot.emit('text', fakeMsg);
+}
+
+async function handleSetCookieCommand(chatId, telegramId, cookie) {
+    const fakeMsg = { chat: { id: chatId }, from: { id: telegramId }, text: `/setcookie ${cookie}` };
+    bot.emit('text', fakeMsg);
+}
+
+async function handleAmazonCommand(chatId, telegramId, input) {
+    const fakeMsg = { chat: { id: chatId }, from: { id: telegramId }, text: `/amazon ${input}` };
+    bot.emit('text', fakeMsg);
+}
+
+async function handleLimpiadorCommand(chatId, telegramId, texto) {
+    const fakeMsg = { chat: { id: chatId }, from: { id: telegramId }, text: `/limpiador ${texto}` };
+    bot.emit('text', fakeMsg);
 }
 
 // ========== FUNCIONES DE BASE DE DATOS ==========
@@ -362,7 +519,6 @@ bot.onText(/^\/(?:binlist|bins|list|binl|bnl)(?:\s+(.+))?/i, async (msg, match) 
     clearUserState(telegramId);
 });
 
-// /extrapolador y alias
 bot.onText(/^\/(?:extrapolador|extrapolado|extrapolad|extrapolar|extrapola|extrapol|extrapo|extrap|extras|extra|expo|exp|ext|xtr|xtrp|scrapper|scrapp|scrp)(?:\s+(.+))?/i, async (msg, match) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
@@ -371,84 +527,7 @@ bot.onText(/^\/(?:extrapolador|extrapolado|extrapolad|extrapolar|extrapola|extra
         setUserState(telegramId, { step: 'awaiting_extrapolador_input' });
         return sendSafeMessage(chatId, '🔢 Envía un BIN de 6 dígitos, nombre de banco o país:');
     }
-    if (!await checkAndKickIfNoDaysOrCredits(telegramId, chatId, 10)) return;
-    
-    let bin = input;
-    if (!/^\d{6}$/.test(input)) {
-        await sendSafeMessage(chatId, `🔍 Obteniendo bins de ${input}...`);
-        const binElegido = getBinForBank(input);
-        if (!binElegido) throw new Error('No se encontraron bins para ese banco');
-        bin = binElegido;
-        await sendSafeMessage(chatId, `✅ Usando BIN: ${bin}`);
-    }
-    await sendSafeMessage(chatId, `🔮 Extrapolando para BIN ${bin}...`);
-    
-    try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 180000);
-        const response = await fetch(`${API_EXTRAPOLADOR_URL}/api/search-bin`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ bin }),
-            signal: controller.signal
-        });
-        clearTimeout(timeoutId);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const data = await response.json();
-        if (!data.success || !data.data || data.data.length === 0) throw new Error('Sin resultados');
-        const patrones = {};
-        for (const tarjeta of data.data) {
-            const partes = tarjeta.split('|');
-            if (partes.length < 3) continue;
-            const numero = partes[0];
-            const mes = partes[1];
-            const año = partes[2];
-            if (numero.length !== 16) continue;
-            const prefix = numero.slice(0, 12);
-            const clave = `${prefix}xxxx|${mes}|${año}`;
-            patrones[clave] = (patrones[clave] || 0) + 1;
-        }
-        if (Object.keys(patrones).length === 0) throw new Error('No se extrajeron patrones');
-        const muy = [], mod = [], uni = [];
-        for (const [patron, count] of Object.entries(patrones)) {
-            if (count >= 3) muy.push({ patron, count });
-            else if (count === 2) mod.push({ patron, count });
-            else uni.push({ patron, count });
-        }
-        muy.sort((a,b) => b.count - a.count);
-        mod.sort((a,b) => b.count - a.count);
-        uni.sort((a,b) => b.count - a.count);
-        let mensaje = `=== EXTRAPOLADOR - RESULTADOS ===\n\n`;
-        if (muy.length) {
-            mensaje += `🟢 MUY REPETIDOS (${muy.length}):\n`;
-            for (const p of muy.slice(0,15)) {
-                const [prefix, mes, año] = p.patron.split('|');
-                mensaje += `${prefix} | ${mes}/${año} | (${p.count} veces)\n`;
-            }
-            mensaje += `\n`;
-        }
-        if (mod.length) {
-            mensaje += `🟡 MODERADOS (${mod.length}):\n`;
-            for (const p of mod.slice(0,15)) {
-                const [prefix, mes, año] = p.patron.split('|');
-                mensaje += `${prefix} | ${mes}/${año} | (${p.count} veces)\n`;
-            }
-            mensaje += `\n`;
-        }
-        if (uni.length) {
-            mensaje += `🔴 ÚNICOS (${uni.length}):\n`;
-            for (const p of uni.slice(0,20)) {
-                const [prefix, mes, año] = p.patron.split('|');
-                mensaje += `${prefix} | ${mes}/${año} | (${p.count} vez)\n`;
-            }
-        }
-        if (mensaje.length > 4090) mensaje = mensaje.substring(0,4000) + "\n...";
-        await sendSafeMessage(chatId, mensaje, { parse_mode: 'Markdown' });
-        const creditResult = await deductCredits(telegramId, 10);
-        if (creditResult?.creditsZero) await kickUserFromGroup(telegramId);
-    } catch (error) {
-        await sendSafeMessage(chatId, `❌ Error: ${error.message}`);
-    }
+    await handleExtrapoladorCommand(chatId, telegramId, input);
     clearUserState(telegramId);
 });
 
@@ -869,25 +948,26 @@ bot.on('message', async (msg) => {
     // Procesar según el paso esperado
     switch (state.step) {
         case 'awaiting_binlist_query':
-            bot.emit('text', { ...msg, text: `/binlist ${userText}` });
+            // ✅ Ejecutar directamente la lógica de /binlist
+            await handleBinlistCommand(chatId, telegramId, userText);
             break;
         case 'awaiting_extrapolador_input':
-            bot.emit('text', { ...msg, text: `/extrapolador ${userText}` });
+            await handleExtrapoladorCommand(chatId, telegramId, userText);
             break;
         case 'awaiting_gen_param':
-            bot.emit('text', { ...msg, text: `/gen ${userText}` });
+            await handleGenCommand(chatId, telegramId, userText);
             break;
         case 'awaiting_gencookie_country':
-            bot.emit('text', { ...msg, text: `/gencookie ${userText}` });
+            await handleGenCookieCommand(chatId, telegramId, userText);
             break;
         case 'awaiting_setcookie':
-            bot.emit('text', { ...msg, text: `/setcookie ${userText}` });
+            await handleSetCookieCommand(chatId, telegramId, userText);
             break;
         case 'awaiting_amazon_cards':
-            bot.emit('text', { ...msg, text: `/amazon ${userText}` });
+            await handleAmazonCommand(chatId, telegramId, userText);
             break;
         case 'awaiting_lattice_amount':
-            bot.emit('text', { ...msg, text: `/lattice ${userText}` });
+            await handleLatticeCommand(chatId, telegramId, userText);
             break;
         case 'awaiting_lattice_cards': {
             const amount = state.data.amount;
@@ -921,7 +1001,7 @@ bot.on('message', async (msg) => {
             break;
         }
         case 'awaiting_limpiador':
-            bot.emit('text', { ...msg, text: `/limpiador ${userText}` });
+            await handleLimpiadorCommand(chatId, telegramId, userText);
             break;
         default:
             break;
