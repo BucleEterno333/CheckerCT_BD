@@ -671,17 +671,15 @@ async function verificarTarjetasAmazonConCookie(tarjetas, cookie, chatId, telegr
 // ========== COMANDO /AMAZON (paso 7) ==========
 const amazonRegex = /^\/(?:amazon|amz)(?:\s+(.+))?/i;
 bot.onText(amazonRegex, async (msg, match) => {
-    const chatId = msg.chat.id;
+ const chatId = msg.chat.id;
     const telegramId = msg.from.id;
-    let input = match[1];
-    
-    // Obtener cookie del usuario
-    let user = await getUserByTelegramId(telegramId);
-    let cookie = user?.cookie;
-    
-    // Si no hay cookie, pedirla
+    const user = await getUserByTelegramId(telegramId);
+    if (!user) return sendSafeMessage(chatId, '❌ Usa /start primero.');
+    if (!await checkAndKickIfNoDaysOrCredits(telegramId, chatId, 0)) return;
+
+    let cookie = user.cookie;
     if (!cookie) {
-        const ask = await sendSafeMessage(chatId, '🔑 No tienes cookie guardada. ¿Quieres obtener una nueva? (cuesta 4 créditos)\nEnvía "si" para generar o "no" para cancelar.', {
+        const ask = await sendSafeMessage(chatId, '🔑 No tienes cookie guardada. ¿Quieres obtener una nueva? (cuesta 4 créditos)\nResponde "si" o "no".', {
             reply_markup: { inline_keyboard: [[{ text: '✅ Sí, generar cookie', callback_data: 'gencookie_for_amazon' }]] }
         });
         const respuesta = await new Promise(resolve => {
@@ -714,49 +712,76 @@ bot.onText(amazonRegex, async (msg, match) => {
             return sendSafeMessage(chatId, `❌ Error generando cookie: ${err.message}`);
         }
     }
-    
-    // Obtener tarjetas: pueden venir en input o por interacción
+
     let tarjetas = [];
-    if (input) {
-        if (input.includes('|') && /[0-9X]+/.test(input)) {
-            // Es extra o patrón -> generar tarjetas
-            const extra = input;
-            const generadas = generarTarjetasDesdePatron(extra, 10);
-            tarjetas = generadas;
-        } else if (/^\d{6}$/.test(input)) {
-            // Es bin -> extrapolar y generar
-            await sendSafeMessage(chatId, `🔮 Extrapolando desde BIN ${input}...`);
-            const extrapolado = await fetch(`${API_EXTRAPOLADOR_URL}/extrapolate`, {
-                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ bin: input })
-            }).then(r => r.json());
-            if (!extrapolado.success || !extrapolado.patterns.length) throw new Error('No se pudo extrapolar');
-            const patron = `${extrapolado.patterns[0].prefix}xxxx|${extrapolado.patterns[0].mes}|${extrapolado.patterns[0].año}|rnd`;
-            tarjetas = generarTarjetasDesdePatron(patron, 10);
-        } else {
-            // Asumir texto sucio con tarjetas
-            tarjetas = limpiarTarjetas(input);
-        }
-    }
+    let param = match[1];
     
-    if (tarjetas.length === 0) {
+    if (!param) {
+        // Modo interactivo: pedir tarjetas
         setUserState(telegramId, { step: 'awaiting_amazon_cards' });
-        return sendSafeMessage(chatId, '💳 Envía las tarjetas (formato texto sucio o patrón extra) o escribe "cancelar":');
+        return sendSafeMessage(chatId, '💳 Envía las tarjetas (formato texto sucio, patrón extra o BIN de 6 dígitos):');
     }
+
+    // Detectar tipo de entrada
+    const esBin = /^\d{6}$/.test(param);
+    const esExtra = param.includes('|') && /[0-9X]+\|\d{2}\|\d{2,4}/.test(param);
     
-    if (tarjetas.length > 20) return sendSafeMessage(chatId, `⚠️ Máximo 20 tarjetas (tienes ${tarjetas.length}).`);
-    
-    await sendSafeMessage(chatId, `🔍 Verificando ${tarjetas.length} tarjetas con Amazon...`);
-    const resultados = await verificarTarjetasAmazonConCookie(tarjetas, cookie, chatId, telegramId);
-    
-    // Mostrar resultados con separador aleatorio
-    const separador = SEPARATORS[Math.floor(Math.random() * SEPARATORS.length)];
-    let resumen = `${separador}\n`;
-    for (const r of resultados) {
-        const emoji = r.status === 'LIVE' ? '✅' : (r.status === 'DEAD' ? '❌' : '⚠️');
-        resumen += `• Card: ${r.card}\n• Status: ${r.status} ${emoji}\n${separador}\n`;
+    try {
+        if (esBin) {
+            // 1. Obtener tarjetas mediante extrapolador
+            await sendSafeMessage(chatId, `🔮 Extrapolando desde BIN ${param}...`);
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 30000);
+            const response = await fetch(`${API_EXTRAPOLADOR_URL}/api/search-bin`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ bin: param }),
+                signal: controller.signal
+            });
+            clearTimeout(timeoutId);
+            const responseText = await response.text();
+            let data;
+            try {
+                data = JSON.parse(responseText);
+            } catch (e) {
+                throw new Error('El servidor de extrapolador no devolvió JSON válido.');
+            }
+            if (!response.ok || !data.success || !data.data || data.data.length === 0) {
+                throw new Error(`No se encontraron tarjetas para el BIN ${param}`);
+            }
+            tarjetas = data.data; // array de strings "16digitos|MM|YYYY|CVV"
+            if (tarjetas.length === 0) throw new Error('No se generaron tarjetas.');
+        } 
+        else if (esExtra) {
+            // 2. Generar tarjetas desde patrón
+            const cantidad = 10; // o podrías permitir especificar cantidad
+            tarjetas = generarTarjetasDesdePatron(param, cantidad);
+        } 
+        else {
+            // 3. Limpiar texto sucio
+            tarjetas = limpiarTarjetas(param);
+        }
+
+        if (tarjetas.length === 0) throw new Error('No se encontraron tarjetas válidas.');
+        if (tarjetas.length > 20) return sendSafeMessage(chatId, `⚠️ Máximo 20 tarjetas (tienes ${tarjetas.length}).`);
+
+        await sendSafeMessage(chatId, `🔍 Verificando ${tarjetas.length} tarjetas con Amazon...`);
+        const resultados = await verificarTarjetasAmazon(tarjetas, cookie);
+        
+        // Mostrar resultados con separador aleatorio
+        const separador = SEPARATORS[Math.floor(Math.random() * SEPARATORS.length)];
+        let resumen = `${separador}\n`;
+        for (const r of resultados) {
+            const emoji = r.status === 'LIVE' ? '✅' : (r.status === 'DEAD' ? '❌' : '⚠️');
+            resumen += `• Card: ${r.card}\n• Status: ${r.status} ${emoji}\n${separador}\n`;
+        }
+        if (resumen.length > 4096) resumen = resumen.substring(0, 4000) + '...';
+        await sendSafeMessage(chatId, resumen);
+        
+    } catch (error) {
+        console.error('Error en /amazon:', error);
+        await sendSafeMessage(chatId, `❌ Error: ${error.message}`);
     }
-    if (resumen.length > 4096) resumen = resumen.substring(0, 4000) + '...';
-    await sendSafeMessage(chatId, resumen);
     clearUserState(telegramId);
 });
 
