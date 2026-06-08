@@ -67,6 +67,18 @@ function clearUserState(telegramId) {
     userStates.delete(telegramId);
 }
 
+async function kickUserFromGroup(telegramUserId) {
+    if (!GROUP_CHAT_ID) return false;
+    try {
+        await bot.telegram.kickChatMember(GROUP_CHAT_ID, telegramUserId);
+        console.log(`✅ Usuario ${telegramUserId} expulsado del grupo`);
+        return true;
+    } catch (error) {
+        console.error(`❌ Error expulsando a ${telegramUserId}:`, error.message);
+        return false;
+    }
+}
+
 // ========== FUNCIONES DE BASE DE DATOS ==========
 async function getUserByTelegramId(telegramId) {
     const res = await pool.query(
@@ -526,28 +538,41 @@ bot.onText(genRegex, async (msg, match) => {
             await sendSafeMessage(chatId, `✅ BIN elegido: ${binElegido}`);
             // Paso 2: extrapolar desde ese bin
             await sendSafeMessage(chatId, `🔮 Extrapolando desde ${binElegido}...`);
-            const extrapolado = await fetch(`${API_EXTRAPOLADOR_URL}/extrapolate`, {
+            // Reemplaza los bloques donde haces fetch a /extrapolate
+            const extrapolado = await fetch(`${API_EXTRAPOLADOR_URL}/api/search-bin`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ bin: binElegido })
-            }).then(r => r.json());
-            if (!extrapolado.success || !extrapolado.patterns.length) throw new Error('No se pudo extrapolar');
-            // Elegir primer patrón
-            const primerPatron = extrapolado.patterns[0];
-            patron = `${primerPatron.prefix}xxxx|${primerPatron.mes}|${primerPatron.año}|rnd`;
+                body: JSON.stringify({ bin: binElegido })  // o { bin: param }
+            });
+            const data = await extrapolado.json();
+            if (!data.success || !data.data || data.data.length === 0) throw new Error('No se pudo extrapolar');
+            // Extraer el patrón de la primera tarjeta
+            const primeraTarjeta = data.data[0];
+            const partes = primeraTarjeta.split('|');
+            const prefix = partes[0].slice(0, 12);
+            const mes = partes[1];
+            const año = partes[2];
+            patron = `${prefix}xxxx|${mes}|${año}|rnd`;
             await sendSafeMessage(chatId, `📌 Patrón generado: \`${patron}\``, { parse_mode: 'Markdown' });
         } 
         else if (esBin) {
             // Solo bin: hacer extrapolación y luego generar
             await sendSafeMessage(chatId, `🔮 Extrapolando desde BIN ${param}...`);
-            const extrapolado = await fetch(`${API_EXTRAPOLADOR_URL}/extrapolate`, {
+            // Reemplaza los bloques donde haces fetch a /extrapolate
+            const extrapolado = await fetch(`${API_EXTRAPOLADOR_URL}/api/search-bin`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ bin: param })
-            }).then(r => r.json());
-            if (!extrapolado.success || !extrapolado.patterns.length) throw new Error('No se pudo extrapolar');
-            const primerPatron = extrapolado.patterns[0];
-            patron = `${primerPatron.prefix}xxxx|${primerPatron.mes}|${primerPatron.año}|rnd`;
+                body: JSON.stringify({ bin: binElegido })  // o { bin: param }
+            });
+            const data = await extrapolado.json();
+            if (!data.success || !data.data || data.data.length === 0) throw new Error('No se pudo extrapolar');
+            // Extraer el patrón de la primera tarjeta
+            const primeraTarjeta = data.data[0];
+            const partes = primeraTarjeta.split('|');
+            const prefix = partes[0].slice(0, 12);
+            const mes = partes[1];
+            const año = partes[2];
+            patron = `${prefix}xxxx|${mes}|${año}|rnd`;
             await sendSafeMessage(chatId, `📌 Patrón generado: \`${patron}\``, { parse_mode: 'Markdown' });
         } 
         else {
