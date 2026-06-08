@@ -646,6 +646,17 @@ async function handleSetCookieCommand(chatId, telegramId, cookie) {
     await sendSafeMessage(chatId, '✅ Cookie guardada.');
 }
 
+
+
+
+
+
+
+
+
+
+
+
 async function handleAmazonCommand(chatId, telegramId, param) {
     const user = await getUserByTelegramId(telegramId);
     if (!user) return sendSafeMessage(chatId, '❌ Usa /start primero.');
@@ -655,19 +666,13 @@ async function handleAmazonCommand(chatId, telegramId, param) {
         await sendSafeMessage(chatId, '🔑 No tienes cookie. Usa /gencookie primero.');
         return;
     }
- // ========== NUEVA DETECCIÓN ==========
-    // Si el texto tiene saltos de línea y parece una lista de tarjetas completas
-    const containsNewline = param.includes('\n');
-    const cardLines = param.split(/\r?\n/).filter(l => l.trim().length > 0);
-    const isMultiCard = containsNewline && cardLines.length > 1;
-    
-    // Si es una lista de tarjetas, usamos limpiarTarjetas directamente
-    if (isMultiCard) {
-        const tarjetas = limpiarTarjetas(param);
-        if (tarjetas.length === 0) throw new Error('No se encontraron tarjetas válidas.');
+
+    // ========== NUEVA DETECCIÓN: PRIMERO EXTRAER TARJETAS COMPLETAS ==========
+    let tarjetas = limpiarTarjetas(param);
+    if (tarjetas.length > 0) {
+        // Si se encontraron tarjetas completas, verificarlas directamente
         if (tarjetas.length > 20) return sendSafeMessage(chatId, `⚠️ Máximo 20 tarjetas.`);
         await sendSafeMessage(chatId, `💳 *Tarjetas a verificar:*\n${tarjetas.map(t => `\`${t}\``).join('\n')}`, { parse_mode: 'Markdown' });
-        // Pasar a verificación directamente
         const total = tarjetas.length;
         let progressMsg = await sendSafeMessage(chatId, `🔍 Verificando 0/${total}...`);
         const resultados = [];
@@ -713,15 +718,13 @@ async function handleAmazonCommand(chatId, telegramId, param) {
         return;
     }
 
-    // Si no es lista, proceder con la detección normal (bin, extra, banco, etc.)
+    // Si no hay tarjetas completas, proceder con la detección normal (bin, extra, banco)
     const esBin = /^\d{6}$/.test(param);
     let normalizedParam = normalizarExtra(param);
-    // Para que sea "extra", debe contener X O el número base tener menos de 16 dígitos (para evitar detectar tarjetas completas)
-    const extraPattern = /[0-9X]{6,16}\|\d{1,2}\|\d{2,4}/;
-    const esExtra = normalizedParam.includes('|') && extraPattern.test(normalizedParam) && (normalizedParam.includes('X') || normalizedParam.split('|')[0].length < 16);
+    const esExtra = normalizedParam.includes('|') && /[0-9X]+\|\d{1,2}\|\d{2,4}/.test(normalizedParam) && (normalizedParam.includes('X') || normalizedParam.split('|')[0].length < 16);
     const esBanco = !esBin && !esExtra;
+
     try {
-        let tarjetas = [];
         if (esBin) {
             await sendSafeMessage(chatId, `🔮 Extrapolando BIN ${param}...`);
             const controller = new AbortController();
@@ -768,11 +771,10 @@ async function handleAmazonCommand(chatId, telegramId, param) {
             await handleAmazonCommand(chatId, telegramId, binElegido);
             return;
         } else {
-            tarjetas = limpiarTarjetas(param);
-            if (tarjetas.length === 0) throw new Error('No se encontraron tarjetas.');
-            if (tarjetas.length > 20) return sendSafeMessage(chatId, `⚠️ Máximo 20 tarjetas.`);
-            await sendSafeMessage(chatId, `💳 *Tarjetas a verificar:*\n${tarjetas.map(t => `\`${t}\``).join('\n')}`, { parse_mode: 'Markdown' });
+            throw new Error('Formato no reconocido');
         }
+
+        // Verificar tarjetas obtenidas (provenientes de bin o extra)
         const total = tarjetas.length;
         let progressMsg = await sendSafeMessage(chatId, `🔍 Verificando 0/${total}...`);
         const resultados = [];
@@ -793,13 +795,9 @@ async function handleAmazonCommand(chatId, telegramId, param) {
                     data.message.toLowerCase().includes('account banned') ||
                     data.message.toLowerCase().includes('entra a mi cuenta')
                 );
-
                 resultados.push({ card, status: data.status, message: data.message });
-
                 if (isFatalError) {
-                    // Detener la verificación
-                    await sendSafeMessage(chatId, `⛔ Error fatal: ${data.message}. No se continuará verificando más tarjetas.`);
-                    // Salir del bucle
+                    await sendSafeMessage(chatId, `⛔ Error fatal: ${data.message}. No se continuará.`);
                     break;
                 }
             } catch (err) {
@@ -823,6 +821,13 @@ async function handleAmazonCommand(chatId, telegramId, param) {
         await sendSafeMessage(chatId, `❌ Error: ${error.message}`);
     }
 }
+
+
+
+
+
+
+
 
 async function handleLimpiadorCommand(chatId, telegramId, texto) {
     const tarjetas = limpiarTarjetas(texto);
