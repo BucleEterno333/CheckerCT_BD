@@ -881,8 +881,8 @@ bot.onText(/^\/(?:amazoncookie|amazoncuki|amazonck|amzck)(?:\s+(.+))?/i, async (
 
     clearUserState(telegramId);
 
+    // 1. Si no hay parámetro, pedir datos después de generar cookie
     if (!param) {
-        // Sin parámetro: solo generar cookie y luego pedir datos
         await sendSafeMessage(chatId, '🍪 Generando nueva cookie...');
         try {
             const response = await fetch(`${API_GENCOOKIE_URL}/generate`, {
@@ -902,63 +902,95 @@ bot.onText(/^\/(?:amazoncookie|amazoncuki|amazonck|amzck)(?:\s+(.+))?/i, async (
         return;
     }
 
-    // Verificar si el parámetro es válido antes de iniciar procesos paralelos
-    // Para evitar errores tempranos, validamos rápidamente el tipo
+    // 2. Clasificar el parámetro
     const esBin = /^\d{6}$/.test(param);
-    let normalizedParam = normalizarExtra(param);
-    const esExtra = normalizedParam.includes('|') && /[0-9X]+\|\d{1,2}\|\d{2,4}/.test(normalizedParam);
-    const esBanco = !esBin && !esExtra;
-    const esTarjetas = !esBin && !esExtra && !esBanco && /^\d{16}\|/.test(param); // formato tarjeta
-    if (!esBin && !esExtra && !esBanco && !esTarjetas) {
+    const esBanco = !esBin && getBinForBank(param) !== null;
+    // Para extra: debe contener '|', una fecha y al menos una X
+    const normalizedForExtra = normalizarExtra(param);
+    const esExtra = normalizedForExtra.includes('|') && /[0-9X]+\|\d{1,2}\|\d{2,4}/.test(normalizedForExtra) && normalizedForExtra.includes('X');
+    const esTarjetas = !esBin && !esExtra && !esBanco && limpiarTarjetas(param).length > 0;
+
+    // 3. Si es banco o bin → necesita extrapolación (proceso pesado) → ir a paralelo
+    if (esBin || esBanco) {
+        await sendSafeMessage(chatId, '🔄 Procesando en paralelo: generando cookie y extrapolando...');
+        let cookie = null;
+        let extrapolation = null;
+        let cookieError = null;
+        let extrapolationError = null;
+
+        try {
+            [cookie, extrapolation] = await Promise.all([
+                (async () => {
+                    try {
+                        const response = await fetch(`${API_GENCOOKIE_URL}/generate`, {
+                            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ country: 'MX', add_address: true })
+                        });
+                        const data = await response.json();
+                        if (!data.success) throw new Error('Error al generar cookie');
+                        await updateUserCookie(telegramId, data.data.cookie_string);
+                        const creditResult = await deductCredits(telegramId, 4);
+                        await sendSafeMessage(chatId, `✅ Cookie generada. Créditos restantes: ${creditResult?.newCredits || '?'}.`);
+                        return data.data.cookie_string;
+                    } catch (err) {
+                        cookieError = err;
+                        return null;
+                    }
+                })(),
+                (async () => {
+                    try {
+                        // Si es banco, convertimos a bin
+                        const binParam = esBanco ? getBinForBank(param) : param;
+                        return await prepararExtrapolacion(chatId, telegramId, binParam);
+                    } catch (err) {
+                        extrapolationError = err;
+                        return null;
+                    }
+                })()
+            ]);
+
+            if (cookieError) throw cookieError;
+            if (extrapolationError) throw extrapolationError;
+            if (!extrapolation || !extrapolation.tarjetas || extrapolation.tarjetas.length === 0) {
+                throw new Error('No se generaron tarjetas válidas');
+            }
+            await verificarTarjetasConCookie(chatId, cookie, extrapolation.tarjetas, extrapolation.mensajePrevio);
+        } catch (err) {
+            await sendSafeMessage(chatId, `❌ Error: ${err.message}`);
+        }
+        return;
+    }
+
+    // 4. Si es extra o tarjetas → generación/limpieza instantánea, luego generar cookie y verificar
+    let tarjetas = [];
+    if (esExtra) {
+        tarjetas = generarTarjetasDesdePatron(normalizedForExtra, 20);
+        if (tarjetas.length === 0) throw new Error('No se generaron tarjetas desde el extra');
+        await sendSafeMessage(chatId, `🎴 *Tarjetas generadas (${tarjetas.length}):*\n${tarjetas.slice(0,20).map(t => `\`${t}\``).join('\n')}`, { parse_mode: 'Markdown' });
+    } else if (esTarjetas) {
+        tarjetas = limpiarTarjetas(param);
+        if (tarjetas.length === 0) throw new Error('No se encontraron tarjetas válidas');
+        if (tarjetas.length > 20) return sendSafeMessage(chatId, `⚠️ Máximo 20 tarjetas.`);
+        await sendSafeMessage(chatId, `💳 *Tarjetas a verificar:*\n${tarjetas.map(t => `\`${t}\``).join('\n')}`, { parse_mode: 'Markdown' });
+    } else {
         await sendSafeMessage(chatId, '❌ Formato no reconocido. Envía un BIN, un extra (ej. 481515310022xxxx|09|2029), o un nombre de banco.');
         return;
     }
 
-    await sendSafeMessage(chatId, '🔄 Procesando en paralelo: generando cookie y preparando tarjetas...');
-
-    let cookie = null;
-    let extrapolation = null;
-    let cookieError = null;
-    let extrapolationError = null;
-
+    // Generar cookie (si no existe o sobrescribir) y luego verificar
+    await sendSafeMessage(chatId, '🍪 Generando cookie para verificación...');
     try {
-        [cookie, extrapolation] = await Promise.all([
-            (async () => {
-                try {
-                    const response = await fetch(`${API_GENCOOKIE_URL}/generate`, {
-                        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ country: 'MX', add_address: true })
-                    });
-                    const data = await response.json();
-                    if (!data.success) throw new Error('Error al generar cookie');
-                    await updateUserCookie(telegramId, data.data.cookie_string);
-                    const creditResult = await deductCredits(telegramId, 4);
-                    await sendSafeMessage(chatId, `✅ Cookie generada. Créditos restantes: ${creditResult?.newCredits || '?'}.`);
-                    return data.data.cookie_string;
-                } catch (err) {
-                    cookieError = err;
-                    return null;
-                }
-            })(),
-            (async () => {
-                try {
-                    return await prepararExtrapolacion(chatId, telegramId, param);
-                } catch (err) {
-                    extrapolationError = err;
-                    return null;
-                }
-            })()
-        ]);
-
-        if (cookieError) throw cookieError;
-        if (extrapolationError) throw extrapolationError;
-        if (!extrapolation || !extrapolation.tarjetas || extrapolation.tarjetas.length === 0) {
-            throw new Error('No se generaron tarjetas válidas');
-        }
-
-        await verificarTarjetasConCookie(chatId, cookie, extrapolation.tarjetas, extrapolation.mensajePrevio);
-
+        const response = await fetch(`${API_GENCOOKIE_URL}/generate`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ country: 'MX', add_address: true })
+        });
+        const data = await response.json();
+        if (!data.success) throw new Error('Error al generar cookie');
+        const cookie = data.data.cookie_string;
+        await updateUserCookie(telegramId, cookie);
+        const creditResult = await deductCredits(telegramId, 4);
+        await sendSafeMessage(chatId, `✅ Cookie generada. Créditos restantes: ${creditResult?.newCredits || '?'}.`);
+        await verificarTarjetasConCookie(chatId, cookie, tarjetas, null);
     } catch (err) {
-        await sendSafeMessage(chatId, `❌ Error: ${err.message}`);
+        await sendSafeMessage(chatId, `❌ Error al generar cookie: ${err.message}`);
     }
 });
 
