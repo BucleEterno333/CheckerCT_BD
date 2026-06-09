@@ -87,86 +87,85 @@ async function prepararExtrapolacion(chatId, telegramId, param) {
     
     let tarjetas = [];
     let mensajePrevio = '';
-    
     if (esBin) {
-        await sendSafeMessage(chatId, `🔮 Extrapolando BIN ${param}...`);
+    await sendSafeMessage(chatId, `🔮 Extrapolando BIN ${param}...`);
 
+    let attempts = 0;
+    let data = null;
+    while (attempts < 3 && !data) {
+        try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 420000);
+            const response = await fetch(`${API_EXTRAPOLADOR_URL}/api/search-bin`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ bin: param }), signal: controller.signal
+            });
+            clearTimeout(timeoutId);
+            data = await response.json();
+            if (data.success && data.data.length > 0) break;
+        } catch (err) {
+            attempts++;
+            if (attempts >= 3) throw err;
+            await new Promise(r => setTimeout(r, 2000));
+        }
+    }
+    if (!data.success || !data.data.length) throw new Error('Sin resultados');
+    
+    const patrones = {};
+    for (const tarjeta of data.data) {
+        const partes = tarjeta.split('|');
+        if (partes.length < 3) continue;
+        const numero = partes[0];
+        if (numero.length !== 16) continue;
+        const prefix = numero.slice(0, 12);          // solo los 12 dígitos (sin X)
+        const mes = partes[1];
+        const año = partes[2];
+        const clave = `${prefix}xxxx|${mes}|${año}`; // aquí se añaden 4 X
+        patrones[clave] = (patrones[clave] || 0) + 1;
+    }
+    
+    const ordenados = Object.entries(patrones).map(([p,c]) => ({ patron: p, count: c })).sort((a,b) => b.count - a.count);
+    const mejor = ordenados[0];
+    const [prefijoConX, mes, año] = mejor.patron.split('|');
+    // prefijoConX ya tiene "12digitos+xxxx", no añadir más X
+    const extraElegido = `${prefijoConX}|${mes}|${año}|rnd`;
+    
+    // Construir mensaje resumen (mostrar el extra con 4 X)
+    let mensajeResumen = `=== EXTRAPOLACIÓN COMPLETADA ===\n✅ EXTRA A CHECAR: \`${prefijoConX}|${mes}|${año}|rnd\` | (${mejor.count} veces)\n\n`;
+    
+    const muy = ordenados.filter(p => p.count >= 3).slice(0,10);
+    const mod = ordenados.filter(p => p.count === 2).slice(0,5);
+    const uni = ordenados.filter(p => p.count === 1).slice(0,10);
+    
+    if (muy.length) {
+        mensajeResumen += `🟢 MUY REPETIDOS (${muy.length}):\n`;
+        for (const p of muy) {
+            const [pf, m, a] = p.patron.split('|');
+            mensajeResumen += `\`${pf}|${m}|${a}|rnd\` (${p.count} veces)\n`;
+        }
+        mensajeResumen += `\n`;
+    }
+    if (mod.length) {
+        mensajeResumen += `🟡 MODERADOS (${mod.length}):\n`;
+        for (const p of mod) {
+            const [pf, m, a] = p.patron.split('|');
+            mensajeResumen += `\`${pf}|${m}|${a}|rnd\` (${p.count} veces)\n`;
+        }
+        mensajeResumen += `\n`;
+    }
+    if (uni.length) {
+        mensajeResumen += `🔴 ÚNICOS (${uni.length}):\n`;
+        for (const p of uni) {
+            const [pf, m, a] = p.patron.split('|');
+            mensajeResumen += `\`${pf}|${m}|${a}|rnd\` (${p.count} vez)\n`;
+        }
+    }
+    await sendSafeMessage(chatId, mensajeResumen, { parse_mode: 'Markdown' });
+    
+    tarjetas = generarTarjetasDesdePatron(extraElegido, 20);
+    let lista = `🎴 *Tarjetas generadas (${tarjetas.length}):*\n${tarjetas.slice(0,20).map(t => `\`${t}\``).join('\n')}`;
+    await sendSafeMessage(chatId, lista, { parse_mode: 'Markdown' });
+    mensajePrevio = mensajeResumen;
 
-        let attempts = 0;
-        let data = null;
-        while (attempts < 3 && !data) {
-            try {
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 420000);
-                const response = await fetch(`${API_EXTRAPOLADOR_URL}/api/search-bin`, {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ bin: param }), signal: controller.signal
-                });
-                clearTimeout(timeoutId);
-                data = await response.json();
-                if (data.success && data.data.length > 0) break;
-            } catch (err) {
-                attempts++;
-                if (attempts >= 3) throw err;
-                await new Promise(r => setTimeout(r, 2000)); // espera 2 segundos antes de reintentar
-            }
-        }
-        if (!data.success || !data.data.length) throw new Error('Sin resultados');
-        
-        const patrones = {};
-        for (const tarjeta of data.data) {
-            const partes = tarjeta.split('|');
-            if (partes.length < 3) continue;
-            const numero = partes[0];
-            if (numero.length !== 16) continue;
-            const prefix = numero.slice(0, 12);
-            const mes = partes[1];
-            const año = partes[2];
-            const clave = `${prefix}xxxx|${mes}|${año}`; // Guardamos con año completo
-            patrones[clave] = (patrones[clave] || 0) + 1;
-        }
-        
-        const ordenados = Object.entries(patrones).map(([p,c]) => ({ patron: p, count: c })).sort((a,b) => b.count - a.count);
-        const mejor = ordenados[0];
-        const [prefijo, mes, año] = mejor.patron.split('|');
-        // Extra con formato completo: 12digitos + xxxx | mes | año | rnd
-        const extraElegido = `${prefijo}xxxx|${mes}|${año}|rnd`;
-        
-        // Construir mensaje resumen con el formato deseado
-        let mensajeResumen = `=== EXTRAPOLACIÓN COMPLETADA ===\n✅ EXTRA A CHECAR: \`${prefijo}xxxx|${mes}|${año}|rnd\` | (${mejor.count} veces)\n\n`;
-        
-        const muy = ordenados.filter(p => p.count >= 3).slice(0,10);
-        const mod = ordenados.filter(p => p.count === 2).slice(0,5);
-        const uni = ordenados.filter(p => p.count === 1).slice(0,10);
-        
-        if (muy.length) {
-            mensajeResumen += `🟢 MUY REPETIDOS (${muy.length}):\n`;
-            for (const p of muy) {
-                const [pf, m, a] = p.patron.split('|');
-                mensajeResumen += `\`${pf}xxxx|${m}|${a}|rnd\` (${p.count} veces)\n`;
-            }
-            mensajeResumen += `\n`;
-        }
-        if (mod.length) {
-            mensajeResumen += `🟡 MODERADOS (${mod.length}):\n`;
-            for (const p of mod) {
-                const [pf, m, a] = p.patron.split('|');
-                mensajeResumen += `\`${pf}xxxx|${m}|${a}|rnd\` (${p.count} veces)\n`;
-            }
-            mensajeResumen += `\n`;
-        }
-        if (uni.length) {
-            mensajeResumen += `🔴 ÚNICOS (${uni.length}):\n`;
-            for (const p of uni) {
-                const [pf, m, a] = p.patron.split('|');
-                mensajeResumen += `\`${pf}xxxx|${m}|${a}|rnd\` (${p.count} vez)\n`;
-            }
-        }
-        await sendSafeMessage(chatId, mensajeResumen, { parse_mode: 'Markdown' });
-        
-        tarjetas = generarTarjetasDesdePatron(extraElegido, 20);
-        let lista = `🎴 *Tarjetas generadas (${tarjetas.length}):*\n${tarjetas.slice(0,20).map(t => `\`${t}\``).join('\n')}`;
-        await sendSafeMessage(chatId, lista, { parse_mode: 'Markdown' });
-        mensajePrevio = mensajeResumen;
         
     } else if (esExtra) {
         tarjetas = generarTarjetasDesdePatron(normalizedParam, 20);
