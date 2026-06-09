@@ -1014,6 +1014,20 @@ bot.onText(/^\/(?:amazoncookie|amazoncuki|amazonck|amzck)(?:\s+(.+))?/i, async (
     return;
 });
 
+
+bot.onText(/^\/(?:amazon|amz\b)(?:\s+(.+))?/i, async (msg, match) => {
+    const chatId = msg.chat.id;
+    const telegramId = msg.from.id;
+    let param = match[1];
+    if (!param) {
+        setUserState(telegramId, { step: 'awaiting_amazon_cards' });
+        return sendSafeMessage(chatId, '💳 Envía tarjetas, patrón, BIN o nombre de banco:');
+    }
+    await handleAmazonCommand(chatId, telegramId, param);
+    clearUserState(telegramId);
+});
+
+
 bot.onText(/^\/(?:binlist|bins|list|binl|bnl)(?:\s+(.+))?/i, async (msg, match) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
@@ -1064,17 +1078,6 @@ bot.onText(/^\/(?:setcookie|setcuki|stck|sck|setck|addcookie|addcuki|addck|dck|a
     clearUserState(telegramId);
 });
 
-bot.onText(/^\/(?:amazon|amz)(?:\s+(.+))?/i, async (msg, match) => {
-    const chatId = msg.chat.id;
-    const telegramId = msg.from.id;
-    let param = match[1];
-    if (!param) {
-        setUserState(telegramId, { step: 'awaiting_amazon_cards' });
-        return sendSafeMessage(chatId, '💳 Envía tarjetas, patrón, BIN o nombre de banco:');
-    }
-    await handleAmazonCommand(chatId, telegramId, param);
-    clearUserState(telegramId);
-});
 
 
 
