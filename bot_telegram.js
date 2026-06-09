@@ -921,18 +921,25 @@ bot.onText(/^\/(?:amazoncookie|amazoncuki|amazonck|amzck)(?:\s+(.+))?/i, async (
     }
 
     // 2. Clasificar el parámetro
-    // 2. Clasificar el parámetro de forma robusta
     let tarjetas = [];
     let esBin = /^\d{6}$/.test(param);
     let esBanco = !esBin && getBinForBank(param) !== null;
     let esExtra = false;
     let esTarjetas = false;
 
-    // Intentar generar tarjetas desde el parámetro como si fuera un extra
-    if (!esBin && !esBanco) {
+    // === 1. PRIMERO: intentar limpiar tarjetas completas (lista de tarjetas) ===
+    const tarjetasLimp = limpiarTarjetas(param);
+    if (tarjetasLimp.length > 0) {
+        esTarjetas = true;
+        tarjetas = tarjetasLimp;
+        if (tarjetas.length > 20) return sendSafeMessage(chatId, `⚠️ Máximo 20 tarjetas.`);
+        await sendSafeMessage(chatId, `💳 *Tarjetas a verificar:*\n${tarjetas.map(t => `\`${t}\``).join('\n')}`, { parse_mode: 'Markdown' });
+    }
+    // === 2. SEGUNDO: si no hay tarjetas completas, intentar generar como extra ===
+    else if (!esBin && !esBanco) {
         try {
             const normalized = normalizarExtra(param);
-            const testTarjetas = generarTarjetasDesdePatron(normalized, 1); // probar con 1
+            const testTarjetas = generarTarjetasDesdePatron(normalized, 1);
             if (testTarjetas && testTarjetas.length > 0) {
                 esExtra = true;
                 tarjetas = generarTarjetasDesdePatron(normalized, 20);
