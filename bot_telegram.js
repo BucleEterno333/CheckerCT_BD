@@ -691,11 +691,13 @@ async function handleAmazonCommand(chatId, telegramId, param) {
         return;
     }
 
-    // 1. Limpiar tarjetas completas (lista de tarjetas con 16 dígitos)
+    // 1. Limpiar tarjetas completas (lista)
     let tarjetas = limpiarTarjetas(param);
     if (tarjetas.length > 0) {
-        if (tarjetas.length > 20) return sendSafeMessage(chatId, `⚠️ Máximo 20 tarjetas.`);
-        await sendSafeMessage(chatId, `💳 *Tarjetas a verificar:*\n${tarjetas.map(t => `\`${t}\``).join('\n')}`, { parse_mode: 'Markdown' });
+        if (tarjetas.length > 20) return sendSafeMessage(chatId, '⚠️ Máximo 20 tarjetas.');
+        await sendSafeMessage(chatId, `💳 *Tarjetas a verificar (${tarjetas.length}):*\n${tarjetas.map(t => `\`${t}\``).join('\n')}`, { parse_mode: 'Markdown' });
+        // ... continuación igual que antes (verificación)
+        // (Copiar el bloque de verificación de tu código actual)
         const total = tarjetas.length;
         let progressMsg = await sendSafeMessage(chatId, `🔍 Verificando 0/${total}...`);
         const resultados = [];
@@ -741,18 +743,18 @@ async function handleAmazonCommand(chatId, telegramId, param) {
         return;
     }
 
-    // 2. Detectar si es un EXTRA (contiene | y fecha, incluso si empieza con 6 dígitos)
+    // 2. Detectar si es un extra (contiene | y fecha, independientemente de los dígitos)
     let normalizedParam = normalizarExtra(param);
-    let esExtra = normalizedParam.includes('|') && /[0-9X]+\|\d{1,2}\|\d{2,4}/.test(normalizedParam) && (normalizedParam.includes('X') || normalizedParam.split('|')[0].length < 16);
-    
-    // 3. Detectar BIN (solo si no es extra y son exactamente 6 dígitos)
-    let esBin = false;
-    if (!esExtra) {
-        esBin = /^\d{6}$/.test(param.trim());
-    }
-    
-    // 4. Detectar banco
-    let esBanco = !esExtra && !esBin && getBinForBank(param) !== null;
+    const tienePipe = normalizedParam.includes('|');
+    const tieneFecha = /\d{1,2}[\/\-|]\d{2,4}/.test(normalizedParam);
+    console.log(`[DEBUG] normalizedParam: "${normalizedParam}"`);
+    console.log(`tienePipe: ${tienePipe}, tieneFecha: ${tieneFecha}`);
+    const esExtra = tienePipe && tieneFecha;
+
+    // 3. Si no es extra, comprobar BIN (6 dígitos exactos)
+    const esBin = !esExtra && /^\d{6}$/.test(param.trim());
+    // 4. Si no es extra ni BIN, comprobar banco
+    const esBanco = !esExtra && !esBin && getBinForBank(param) !== null;
 
     try {
         if (esExtra) {
@@ -769,6 +771,8 @@ async function handleAmazonCommand(chatId, telegramId, param) {
             clearTimeout(timeoutId);
             const data = await response.json();
             if (!data.success || !data.data.length) throw new Error('Sin resultados');
+            // ... extraer patrones (como en tu código original)
+            // (Copiar la lógica de extracción de patrones que ya tienes)
             const patrones = {};
             for (const tarjeta of data.data) {
                 const partes = tarjeta.split('|');
@@ -801,10 +805,10 @@ async function handleAmazonCommand(chatId, telegramId, param) {
             await handleAmazonCommand(chatId, telegramId, binElegido);
             return;
         } else {
-            throw new Error('Formato no reconocido');
+            throw new Error('Formato no reconocido. Envía un BIN, un extra o una lista de tarjetas.');
         }
 
-        // Verificar tarjetas obtenidas (provenientes de extra o bin)
+        // Verificar tarjetas (igual que antes)
         const total = tarjetas.length;
         let progressMsg = await sendSafeMessage(chatId, `🔍 Verificando 0/${total}...`);
         const resultados = [];
