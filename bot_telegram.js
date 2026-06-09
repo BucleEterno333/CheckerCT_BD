@@ -861,7 +861,7 @@ async function handleLimpiadorCommand(chatId, telegramId, texto) {
     await sendSafeMessage(chatId, `🔍 *Tarjetas encontradas (${tarjetas.length}):*\n${lista}`, { parse_mode: 'Markdown' });
 }
 
-// ==================== COMANDOS ====================
+// ==================== COMANDOS ================
 
 bot.onText(/\/start/, async (msg) => {
     const chatId = msg.chat.id;
