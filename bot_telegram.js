@@ -380,19 +380,28 @@ function calcularDigitoLuhn(numeroParcial) {
 function limpiarTarjetas(textoSucio) {
     const textoLimpio = textoSucio
         .replace(/[\u200b\u2060\u200C\u200D\uFEFF]/g, '')
-        .replace(/\s+/g, ' ')
-        .replace(/\[.*?\]/g, '')
-        .replace(/\(.*?\)/g, '')
+        .replace(/\r\n/g, '\n')
+        .replace(/\n+/g, '\n')
         .trim();
+    
+    // Patrón que captura tarjetas en cualquier línea (16 dígitos, barra o espacio, mes, año, cvv)
     const patron = /(\d{16})\s*[|│]\s*(\d{2})\s*[|│]\s*(\d{4})\s*[|│]\s*(\d{3})/g;
     const tarjetas = [];
     let match;
     while ((match = patron.exec(textoLimpio)) !== null) {
         const [_, num, mes, año, cvv] = match;
-        if (num.length === 16 && mes.length === 2 && año.length === 4 && cvv.length === 3) {
-            tarjetas.push(`${num}|${mes}|${año}|${cvv}`);
+        // Asegurar año de 4 dígitos (ya viene con 4)
+        tarjetas.push(`${num}|${mes}|${año}|${cvv}`);
+    }
+    
+    // Si no encontró con el patrón principal, probar con espacios o guiones
+    if (tarjetas.length === 0) {
+        const patron2 = /(\d{16})\s+(\d{2})\s+(\d{4})\s+(\d{3})/g;
+        while ((match = patron2.exec(textoLimpio)) !== null) {
+            tarjetas.push(`${match[1]}|${match[2]}|${match[3]}|${match[4]}`);
         }
     }
+    
     return [...new Set(tarjetas)];
 }
 
@@ -927,15 +936,16 @@ bot.onText(/^\/(?:amazoncookie|amazoncuki|amazonck|amzck)(?:\s+(.+))?/i, async (
     let esExtra = false;
     let esTarjetas = false;
 
-    // === 1. PRIMERO: intentar limpiar tarjetas completas (lista de tarjetas) ===
+    // PRIMERO: Intentar limpiar tarjetas completas (lista de tarjetas)
     const tarjetasLimp = limpiarTarjetas(param);
     if (tarjetasLimp.length > 0) {
         esTarjetas = true;
         tarjetas = tarjetasLimp;
         if (tarjetas.length > 20) return sendSafeMessage(chatId, `⚠️ Máximo 20 tarjetas.`);
-        await sendSafeMessage(chatId, `💳 *Tarjetas a verificar:*\n${tarjetas.map(t => `\`${t}\``).join('\n')}`, { parse_mode: 'Markdown' });
+        // Mostrar solo UNA vez la lista completa
+        await sendSafeMessage(chatId, `💳 *Tarjetas a verificar (${tarjetas.length}):*\n${tarjetas.map(t => `\`${t}\``).join('\n')}`, { parse_mode: 'Markdown' });
     }
-    // === 2. SEGUNDO: si no hay tarjetas completas, intentar generar como extra ===
+    // SEGUNDO: Si no hay tarjetas completas, probar como extra
     else if (!esBin && !esBanco) {
         try {
             const normalized = normalizarExtra(param);
@@ -945,9 +955,7 @@ bot.onText(/^\/(?:amazoncookie|amazoncuki|amazonck|amzck)(?:\s+(.+))?/i, async (
                 tarjetas = generarTarjetasDesdePatron(normalized, 20);
                 await sendSafeMessage(chatId, `🎴 *Tarjetas generadas (${tarjetas.length}):*\n${tarjetas.slice(0,20).map(t => `\`${t}\``).join('\n')}`, { parse_mode: 'Markdown' });
             }
-        } catch (e) {
-            // No es un extra válido
-        }
+        } catch (e) {}
     }
 
     // Si no es extra, intentar limpiar tarjetas completas
@@ -1037,7 +1045,7 @@ bot.onText(/^\/(?:amazoncookie|amazoncuki|amazonck|amzck)(?:\s+(.+))?/i, async (
 });
 
 
-bot.onText(/^\/(?:amazon|amz\b)(?:\s+(.+))?/i, async (msg, match) => {
+bot.onText(/^\/(?:amazon\b|amz\b)(?:\s+(.+))?/i, async (msg, match) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
     let param = match[1];
