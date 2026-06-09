@@ -681,12 +681,6 @@ async function handleSetCookieCommand(chatId, telegramId, cookie) {
 
 
 
-
-
-
-
-
-
 async function handleAmazonCommand(chatId, telegramId, param) {
     const user = await getUserByTelegramId(telegramId);
     if (!user) return sendSafeMessage(chatId, '❌ Usa /start primero.');
@@ -697,10 +691,9 @@ async function handleAmazonCommand(chatId, telegramId, param) {
         return;
     }
 
-    // ========== NUEVA DETECCIÓN: PRIMERO EXTRAER TARJETAS COMPLETAS ==========
+    // 1. Limpiar tarjetas completas (lista de tarjetas con 16 dígitos)
     let tarjetas = limpiarTarjetas(param);
     if (tarjetas.length > 0) {
-        // Si se encontraron tarjetas completas, verificarlas directamente
         if (tarjetas.length > 20) return sendSafeMessage(chatId, `⚠️ Máximo 20 tarjetas.`);
         await sendSafeMessage(chatId, `💳 *Tarjetas a verificar:*\n${tarjetas.map(t => `\`${t}\``).join('\n')}`, { parse_mode: 'Markdown' });
         const total = tarjetas.length;
@@ -748,14 +741,25 @@ async function handleAmazonCommand(chatId, telegramId, param) {
         return;
     }
 
-    // Si no hay tarjetas completas, proceder con la detección normal (bin, extra, banco)
-    const esBin = /^\d{6}$/.test(param);
+    // 2. Detectar si es un EXTRA (contiene | y fecha, incluso si empieza con 6 dígitos)
     let normalizedParam = normalizarExtra(param);
-    const esExtra = normalizedParam.includes('|') && /[0-9X]+\|\d{1,2}\|\d{2,4}/.test(normalizedParam) && (normalizedParam.includes('X') || normalizedParam.split('|')[0].length < 16);
-    const esBanco = !esBin && !esExtra;
+    let esExtra = normalizedParam.includes('|') && /[0-9X]+\|\d{1,2}\|\d{2,4}/.test(normalizedParam) && (normalizedParam.includes('X') || normalizedParam.split('|')[0].length < 16);
+    
+    // 3. Detectar BIN (solo si no es extra y son exactamente 6 dígitos)
+    let esBin = false;
+    if (!esExtra) {
+        esBin = /^\d{6}$/.test(param.trim());
+    }
+    
+    // 4. Detectar banco
+    let esBanco = !esExtra && !esBin && getBinForBank(param) !== null;
 
     try {
-        if (esBin) {
+        if (esExtra) {
+            tarjetas = generarTarjetasDesdePatron(normalizedParam, 20);
+            let lista = `🎴 *Tarjetas generadas (${tarjetas.length}):*\n${tarjetas.slice(0,20).map(t => `\`${t}\``).join('\n')}`;
+            await sendSafeMessage(chatId, lista, { parse_mode: 'Markdown' });
+        } else if (esBin) {
             await sendSafeMessage(chatId, `🔮 Extrapolando BIN ${param}...`);
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 180000);
@@ -790,10 +794,6 @@ async function handleAmazonCommand(chatId, telegramId, param) {
             tarjetas = generarTarjetasDesdePatron(extraElegido, 20);
             let lista = `🎴 *Tarjetas generadas (${tarjetas.length}):*\n${tarjetas.slice(0,20).map(t => `\`${t}\``).join('\n')}`;
             await sendSafeMessage(chatId, lista, { parse_mode: 'Markdown' });
-        } else if (esExtra) {
-            tarjetas = generarTarjetasDesdePatron(normalizedParam, 20);
-            let lista = `🎴 *Tarjetas generadas (${tarjetas.length}):*\n${tarjetas.slice(0,20).map(t => `\`${t}\``).join('\n')}`;
-            await sendSafeMessage(chatId, lista, { parse_mode: 'Markdown' });
         } else if (esBanco) {
             const binElegido = getBinForBank(param);
             if (!binElegido) throw new Error('No se encontraron bins');
@@ -804,7 +804,7 @@ async function handleAmazonCommand(chatId, telegramId, param) {
             throw new Error('Formato no reconocido');
         }
 
-        // Verificar tarjetas obtenidas (provenientes de bin o extra)
+        // Verificar tarjetas obtenidas (provenientes de extra o bin)
         const total = tarjetas.length;
         let progressMsg = await sendSafeMessage(chatId, `🔍 Verificando 0/${total}...`);
         const resultados = [];
@@ -851,11 +851,6 @@ async function handleAmazonCommand(chatId, telegramId, param) {
         await sendSafeMessage(chatId, `❌ Error: ${error.message}`);
     }
 }
-
-
-
-
-
 
 
 
