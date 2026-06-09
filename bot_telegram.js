@@ -1164,20 +1164,20 @@ bot.onText(/\/help/, async (msg) => {
         `🔹 *Búsqueda y extrapolación*\n` +
         `/binlist [banco|país] - Lista bins de un banco o país\n` +
         `   Alias: /bins, /list, /binl, /bnl\n` +
-        `/extrapolador [bin|banco] - Extrae patrones desde un BIN o banco (10 créditos)\n` +
+        `/extrapolador [banco|país|bin] - Extrae patrones desde un BIN o banco (10 créditos)\n` +
         `   Alias: /extrapolado, /extrapolar, /extra, /scrapper, /scrapp, /scrp, /xtr, etc.\n` +
-        `/gen [extra|bin|banco] - Genera tarjetas desde un patrón, BIN o banco (4 créditos)\n` +
+        `/gen [banco|país|bin|extra] - Genera tarjetas desde un patrón, BIN o banco (4 créditos)\n` +
         `   Alias: /generadorccs, /genccs, /gncc\n` +
         `   Ejemplo: /gen 481515310022xxxx|09|2029|rnd 20\n\n` +
         
         `🔹 *Verificación en Amazon*\n` +
-        `/amazon [extra|bin|tarjetas|banco] - Verifica tarjetas con la cookie guardada\n` +
+        `/amazon [banco|país|bin|extra|tarjetas] - Verifica tarjetas con la cookie guardada\n` +
         `   Alias: /amz\n` +
-        `/amazoncookie [extra|bin|tarjetas|banco] - Genera cookie nueva y verifica (4 créditos)\n` +
+        `/amazoncookie [banco|país|bin|extra|tarjetas] - Genera cookie nueva y verifica (4 créditos)\n` +
         `   Alias: /amazoncuki, /amazonck, /amzck\n\n` +
         
         `🔹 *Otras herramientas*\n` +
-        `/lattice [monto] - Verifica tarjetas con Lattice (1 crédito)\n` +
+        `/lattice [monto] - Gate charged (1 crédito por dead o live)\n` +
         `/limpiador - Extrae tarjetas de texto sucio\n` +
         `   Ejemplo: envía un texto con tarjetas sucias y el bot las limpiará\n\n` +
         
