@@ -1148,7 +1148,50 @@ bot.onText(/\/menu/, async (msg) => {
 
 bot.onText(/\/help/, async (msg) => {
     await sendSafeMessage(msg.chat.id,
-        `📖 *Comandos:*\n/start\n/gencookie [país]\n/setcookie [cookie]\n/binlist [banco/pais]\n/extrapolador [bin|banco]\n/gen [extra|bin|banco]\n/amazon [extra|bin|tarjetas|banco]\n/amazoncookie [extra|bin|banco]\n/lattice [monto]\n/limpiador\n/creditos\n/menu`, { parse_mode: 'Markdown' });
+        `📖 *COMANDOS DISPONIBLES*\n\n` +
+        `🔹 *Gestión de cuenta*\n` +
+        `/start - Vincular tu cuenta de Telegram\n` +
+        `/creditos - Ver tus créditos y días restantes\n` +
+        `/menu - Mostrar menú interactivo\n\n` +
+        
+        `🔹 *Generación de cookies*\n` +
+        `/gencookie [país] - Genera cookie (4 créditos)\n` +
+        `   País: MX, US, CA, UK, DE, FR, IT, ES, JP, AU, IN\n` +
+        `   Alias: /gencuki, /genck, /gnck\n` +
+        `/setcookie [cookie] - Guarda una cookie manualmente\n` +
+        `   Alias: /setcuki, /stck, /sck, /setck, /addcookie, /addcuki, /addck, /dck, /ack\n\n` +
+        
+        `🔹 *Búsqueda y extrapolación*\n` +
+        `/binlist [banco|país] - Lista bins de un banco o país\n` +
+        `   Alias: /bins, /list, /binl, /bnl\n` +
+        `/extrapolador [bin|banco] - Extrae patrones desde un BIN o banco (10 créditos)\n` +
+        `   Alias: /extrapolado, /extrapolar, /extra, /scrapper, /scrapp, /scrp, /xtr, etc.\n` +
+        `/gen [extra|bin|banco] - Genera tarjetas desde un patrón, BIN o banco (4 créditos)\n` +
+        `   Alias: /generadorccs, /genccs, /gncc\n` +
+        `   Ejemplo: /gen 481515310022xxxx|09|2029|rnd 20\n\n` +
+        
+        `🔹 *Verificación en Amazon*\n` +
+        `/amazon [extra|bin|tarjetas|banco] - Verifica tarjetas con la cookie guardada\n` +
+        `   Alias: /amz\n` +
+        `/amazoncookie [extra|bin|tarjetas|banco] - Genera cookie nueva y verifica (4 créditos)\n` +
+        `   Alias: /amazoncuki, /amazonck, /amzck\n\n` +
+        
+        `🔹 *Otras herramientas*\n` +
+        `/lattice [monto] - Verifica tarjetas con Lattice (1 crédito)\n` +
+        `/limpiador - Extrae tarjetas de texto sucio\n` +
+        `   Ejemplo: envía un texto con tarjetas sucias y el bot las limpiará\n\n` +
+        
+        `📌 *Formatos aceptados:*\n` +
+        `• Extra: 16 dígitos con X (ej. 481515310022xxxx|09|2029|rnd)\n` +
+        `• BIN: 6 dígitos (ej. 481515)\n` +
+        `• Banco: nombre (ej. banorte, bbva, bancoppel)\n` +
+        `• Tarjetas: lista en líneas separadas (16|MM|AAAA|CVV)\n\n` +
+        
+        `💡 *Uso interactivo:*\n` +
+        `Si escribes un comando sin parámetros, el bot te pedirá los datos.\n` +
+        `Tienes 5 minutos para responder.`,
+        { parse_mode: 'Markdown' }
+    );
 });
 
 // ========== MANEJO DE RESPUESTAS INTERACTIVAS ==========
