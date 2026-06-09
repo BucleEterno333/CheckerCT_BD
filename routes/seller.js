@@ -4,8 +4,19 @@ const router = express.Router();
 const { authenticate, requireRole, trackActivity } = require('../middleware/auth');
 const User = require('../models/User');
 
-// Todas las rutas requieren autenticación
+const allowBot = (req, res, next) => {
+    const botKey = req.headers['x-bot-key'];
+    if (botKey && botKey === BOT_API_KEY) {
+        // Asignar un usuario ficticio con rol admin para que pase las validaciones
+        req.user = { id: 0, role: 'admin', is_active: true, credits: 999999 };
+        return next();
+    }
+    next(); // si no es el bot, continuar con la autenticación normal
+};
+
+router.use(allowBot);
 router.use(authenticate);
+
 
 // ========== RUTAS DE SELLER ==========
 
