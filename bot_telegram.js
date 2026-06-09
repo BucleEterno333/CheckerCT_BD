@@ -878,10 +878,13 @@ bot.onText(/^\/(?:amazoncookie|amazoncuki|amazonck|amzck)(?:\s+(.+))?/i, async (
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
     let param = match[1] ? match[1].trim() : null;
+    // Eliminar caracteres invisibles (saltos de línea, tabulaciones, etc.)
+    if (param) param = param.replace(/[\n\r\t]+/g, ' ').trim();
+    if (param === '') param = null;
 
     clearUserState(telegramId);
-
-    // 1. Si no hay parámetro, pedir datos después de generar cookie
+    console.log(`[DEBUG] /amazoncookie param: "${param}"`);
+    // 1. Si no hay parámetro (o solo espacios), pedir datos después de generar cookie
     if (!param) {
         await sendSafeMessage(chatId, '🍪 Generando nueva cookie...');
         try {
