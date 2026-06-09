@@ -56,6 +56,82 @@ const bankBins = {
     banorte: ['418914', '493173', '493158', '491566']
 };
 
+// Obtiene los patrones (extras) ordenados por frecuencia para un BIN
+async function getPatternsFromBin(chatId, bin) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 180000);
+    const response = await fetch(`${API_EXTRAPOLADOR_URL}/api/search-bin`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bin }),
+        signal: controller.signal
+    });
+    clearTimeout(timeoutId);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    if (!data.success || !data.data || data.data.length === 0) {
+        throw new Error('No se encontraron tarjetas para ese BIN');
+    }
+
+    const patrones = {};
+    for (const tarjeta of data.data) {
+        const partes = tarjeta.split('|');
+        if (partes.length < 3) continue;
+        const numero = partes[0];
+        if (numero.length !== 16) continue;
+        const prefix = numero.slice(0, 12);
+        const mes = partes[1];
+        const año = partes[2];
+        const clave = `${prefix}xxxx|${mes}|${año}`;
+        patrones[clave] = (patrones[clave] || 0) + 1;
+    }
+    if (Object.keys(patrones).length === 0) throw new Error('No se extrajeron patrones');
+
+    const ordenados = Object.entries(patrones).map(([p, c]) => ({ patron: p, count: c })).sort((a, b) => b.count - a.count);
+    return ordenados.map(p => {
+        const [prefijo, mes, año] = p.patron.split('|');
+        return `${prefijo}|${mes}|${año}|rnd`;
+    });
+}
+
+async function procesarExtraConCookie(chatId, extra, index) {
+    // Generar cookie
+    const cookieResponse = await fetch(`${API_GENCOOKIE_URL}/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ country: 'MX', add_address: true })
+    });
+    const cookieData = await cookieResponse.json();
+    if (!cookieData.success) throw new Error(`Error generando cookie para extra ${index}`);
+    const cookie = cookieData.data.cookie_string;
+
+    // Generar tarjetas desde el extra
+    const tarjetas = generarTarjetasDesdePatron(extra, 20);
+    if (tarjetas.length === 0) throw new Error(`No se generaron tarjetas para extra ${index}`);
+
+    // Verificar tarjetas con esta cookie
+    const resultados = [];
+    for (const card of tarjetas) {
+        try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 120000);
+            const resp = await fetch(API_AMAZON_CHECK_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ card, cookies: cookie }),
+                signal: controller.signal
+            });
+            clearTimeout(timeoutId);
+            const data = await resp.json();
+            resultados.push({ card, status: data.status, message: data.message });
+        } catch (err) {
+            resultados.push({ card, status: 'ERROR', message: err.message });
+        }
+        await new Promise(r => setTimeout(r, 800));
+    }
+    return { extra, resultados, cookieUsed: cookie };
+}
+
 function getBinForBank(bankName) {
     const name = bankName.toLowerCase().trim();
     for (const [key, bins] of Object.entries(bankBins)) {
@@ -263,6 +339,70 @@ async function verificarTarjetasConCookie(chatId, cookie, tarjetas, mensajePrevi
     await sendSafeMessage(chatId, resumen, { parse_mode: 'Markdown' });
 }
 
+// Procesa un extra generando 'cantidad' tarjetas y verificándolas con rotación asíncrona de cookies
+async function procesarExtraInfinita(chatId, telegramId, extra, cantidadTarjetas, extraIndex) {
+    // Generar todas las tarjetas de una vez
+    const todasLasTarjetas = generarTarjetasDesdePatron(extra, cantidadTarjetas);
+    const total = todasLasTarjetas.length;
+    if (total === 0) throw new Error('No se generaron tarjetas para el extra');
+
+    let stats = { lives: 0, deads: 0, errors: 0, cookiesUsadas: 0 };
+    let currentCookie = null;
+    let nextCookiePromise = null;
+
+    // Función local para generar cookie y descontar créditos
+    const generarCookieAsync = async () => {
+        const response = await fetch(`${API_GENCOOKIE_URL}/generate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ country: 'MX', add_address: true })
+        });
+        const data = await response.json();
+        if (!data.success) throw new Error('Error generando cookie');
+        const creditResult = await deductCredits(telegramId, 4);
+        if (creditResult?.creditsZero) await kickUserFromGroup(telegramId);
+        stats.cookiesUsadas++;
+        return data.data.cookie_string;
+    };
+
+    // Inicializar cookie actual y empezar reserva
+    currentCookie = await generarCookieAsync();
+    nextCookiePromise = generarCookieAsync().catch(err => {
+        console.error('Error generando cookie de reserva:', err);
+        return null;
+    });
+
+    // Verificar tarjeta por tarjeta
+    for (let i = 0; i < total; i++) {
+        const card = todasLasTarjetas[i];
+        const resultado = await verificarTarjetaConCookie(card, currentCookie);
+
+        if (resultado.status === 'LIVE') stats.lives++;
+        else if (resultado.status === 'DEAD') stats.deads++;
+        else stats.errors++;
+
+        if (resultado.isBanned) {
+            // Cambiar a cookie de reserva
+            if (nextCookiePromise) {
+                currentCookie = await nextCookiePromise;
+                if (!currentCookie) throw new Error('No se pudo obtener cookie de reserva');
+            } else {
+                currentCookie = await generarCookieAsync();
+            }
+            // Lanzar nueva reserva
+            nextCookiePromise = generarCookieAsync().catch(err => {
+                console.error('Error generando cookie de reserva:', err);
+                return null;
+            });
+        }
+        await new Promise(r => setTimeout(r, 800));
+    }
+
+    // Limpiar promesa pendiente
+    if (nextCookiePromise) nextCookiePromise.catch(() => {});
+    return { extra, stats, totalTarjetas: total };
+}
+
 // ========== GESTIÓN DE ESTADOS ==========
 const userStates = new Map();
 
@@ -308,18 +448,29 @@ async function callApiWithBotKey(endpoint, method, body = null) {
 }
 
 async function findUserByUsernameOrId(identifier, requesterRole) {
-    const isId = /^\d+$/.test(identifier);
-    let url = `/admin/users?search=${encodeURIComponent(identifier)}`;
-    if (isId) url = `/admin/users/${identifier}`;
+    // 1. Buscar por username (búsqueda parcial, luego filtramos exacto)
+    let data;
     try {
-        const data = await callApiWithBotKey(url, 'GET');
-        if (isId) return data.user;
-        const user = data.users?.find(u => u.username.toLowerCase() === identifier.toLowerCase());
-        if (!user) throw new Error(`Usuario "${identifier}" no encontrado`);
-        return user;
-    } catch (error) {
-        throw new Error(`No se pudo encontrar al usuario: ${error.message}`);
+        data = await callApiWithBotKey(`/admin/users?search=${encodeURIComponent(identifier)}`, 'GET');
+    } catch (err) {
+        data = { users: [] };
     }
+    // Buscar coincidencia exacta (case-insensitive)
+    const exactMatch = data.users?.find(u => u.username.toLowerCase() === identifier.toLowerCase());
+    if (exactMatch) return exactMatch;
+
+    // 2. Si es numérico, intentar por ID
+    if (/^\d+$/.test(identifier)) {
+        try {
+            const userById = await callApiWithBotKey(`/admin/users/${identifier}`, 'GET');
+            if (userById.user) return userById.user;
+        } catch (err) {
+            // Ignorar, el ID no existe
+        }
+    }
+
+    // 3. Si nada funciona, error
+    throw new Error(`Usuario "${identifier}" no encontrado`);
 }
 
 // ========== FUNCIONES DE BASE DE DATOS ==========
@@ -904,11 +1055,16 @@ async function handleLimpiadorCommand(chatId, telegramId, texto) {
 // ==================== COMANDOS ====================
 
 bot.onText(/^[\/\.]info(?:\s+([^\s]+))?/i, async (msg, match) => {
+    const args = match[1] ? match[1].trim().split(/\s+/) : [];    
     const chatId = msg.chat.id;
     const requesterId = msg.from.id;
-    let target = match[1];
+    let target = args[0];
     if (!target && msg.reply_to_message && msg.reply_to_message.text) {
         target = msg.reply_to_message.text.trim();
+    }
+    if (target && /^\d+$/.test(target) && parseInt(target) < 10000) {
+        // Probablemente no es un ID real, pedir de nuevo
+        target = null;
     }
     const role = await getUserRoleFromDB(requesterId);
     if (role !== 'admin' && role !== 'seller') {
@@ -937,15 +1093,28 @@ bot.onText(/^[\/\.]info(?:\s+([^\s]+))?/i, async (msg, match) => {
 });
 
 bot.onText(/^[\/\.]setcredits(?:\s+([^\s]+)\s+(\d+))?/i, async (msg, match) => {
+    const args = match[1] ? match[1].trim().split(/\s+/) : [];
     const chatId = msg.chat.id;
     const requesterId = msg.from.id;
-    let target = match[1];
-    let amount = match[2];
+    let target = args[0];
+    let amount = args[1];
     if (!target && msg.reply_to_message && msg.reply_to_message.text) {
-        const replyText = msg.reply_to_message.text;
+        const replyText = msg.reply_to_message.text.trim();
         const parts = replyText.split(/\s+/);
-        target = parts[0];
-        amount = parts[1];
+        // Si el reply tiene dos partes, asumimos usuario y cantidad
+        if (parts.length >= 2) {
+            target = parts[0];
+            amount = parts[1];
+        } else {
+            // Si solo tiene una parte, es el usuario y faltan los días
+            target = parts[0];
+            amount = null; // forzamos a null para que entre en modo interactivo
+        }
+    }
+
+    if (target && /^\d+$/.test(target) && parseInt(target) < 10000) {
+        // Probablemente no es un ID real, pedir de nuevo
+        target = null;
     }
     const role = await getUserRoleFromDB(requesterId);
     if (role !== 'admin') return sendSafeMessage(chatId, '❌ Solo administradores pueden usar este comando.');
@@ -963,16 +1132,29 @@ bot.onText(/^[\/\.]setcredits(?:\s+([^\s]+)\s+(\d+))?/i, async (msg, match) => {
     clearUserState(requesterId);
 });
 
-bot.onText(/^[\/\.]setdays(?:\s+([^\s]+)\s+(\d+))?/i, async (msg, match) => {
-    const chatId = msg.chat.id;
+bot.onText(/^[\/\.]setdays(?:\s+(.*))?/i, async (msg, match) => {
+    const args = match[1] ? match[1].trim().split(/\s+/) : [];
     const requesterId = msg.from.id;
-    let target = match[1];
-    let days = match[2];
+
+    let target = args[0];
+    let days = args[1];
     if (!target && msg.reply_to_message && msg.reply_to_message.text) {
-        const replyText = msg.reply_to_message.text;
+        const replyText = msg.reply_to_message.text.trim();
         const parts = replyText.split(/\s+/);
-        target = parts[0];
-        days = parts[1];
+        // Si el reply tiene dos partes, asumimos usuario y cantidad
+        if (parts.length >= 2) {
+            target = parts[0];
+            days = parts[1];
+        } else {
+            // Si solo tiene una parte, es el usuario y faltan los días
+            target = parts[0];
+            days = null; // forzamos a null para que entre en modo interactivo
+        }
+    }
+
+    if (target && /^\d+$/.test(target) && parseInt(target) < 10000) {
+        // Probablemente no es un ID real, pedir de nuevo
+        target = null;
     }
     const role = await getUserRoleFromDB(requesterId);
     if (role !== 'admin') return sendSafeMessage(chatId, '❌ Solo administradores pueden usar este comando.');
@@ -1000,17 +1182,23 @@ const planConfig = {
 bot.onText(/^[\/\.]setplan(20|60|120|200)(?:\s+([^\s]+))?/i, async (msg, match) => {
     const chatId = msg.chat.id;
     const requesterId = msg.from.id;
-    const plan = match[1];
-    let target = match[2];
+    const plan = match[1];      // '20', '60', '120' o '200'
+    let target = match[2];      // puede ser undefined
+
     if (!target && msg.reply_to_message && msg.reply_to_message.text) {
         target = msg.reply_to_message.text.trim();
     }
+
     const role = await getUserRoleFromDB(requesterId);
-    if (role !== 'admin' && role !== 'seller') return sendSafeMessage(chatId, '❌ No tienes permiso para usar este comando.');
+    if (role !== 'admin' && role !== 'seller') {
+        return sendSafeMessage(chatId, '❌ No tienes permiso para usar este comando.');
+    }
+
     if (!target) {
         setUserState(requesterId, { step: `awaiting_setplan_${plan}` });
         return sendSafeMessage(chatId, `💎 Envía @usuario|id para asignar el plan ${plan} (${planConfig[plan].credits} créditos / ${planConfig[plan].days} días):`);
     }
+
     try {
         const user = await findUserByUsernameOrId(target, role);
         const { credits, days } = planConfig[plan];
@@ -1033,9 +1221,10 @@ async function changeRole(chatId, requesterId, target, newRole) {
 }
 
 bot.onText(/^[\/\.]setadmin(?:\s+([^\s]+))?/i, async (msg, match) => {
+    const args = match[1] ? match[1].trim().split(/\s+/) : [];
     const chatId = msg.chat.id;
     const requesterId = msg.from.id;
-    let target = match[1];
+    let target = args[0];
     if (!target && msg.reply_to_message && msg.reply_to_message.text) target = msg.reply_to_message.text.trim();
     if (!target) {
         setUserState(requesterId, { step: 'awaiting_setadmin' });
@@ -1052,7 +1241,8 @@ bot.onText(/^[\/\.]setadmin(?:\s+([^\s]+))?/i, async (msg, match) => {
 bot.onText(/^[\/\.]setseller(?:\s+([^\s]+))?/i, async (msg, match) => {
     const chatId = msg.chat.id;
     const requesterId = msg.from.id;
-    let target = match[1];
+    const args = match[1] ? match[1].trim().split(/\s+/) : [];
+    let target = args[0];
     if (!target && msg.reply_to_message && msg.reply_to_message.text) target = msg.reply_to_message.text.trim();
     if (!target) {
         setUserState(requesterId, { step: 'awaiting_setseller' });
@@ -1069,7 +1259,8 @@ bot.onText(/^[\/\.]setseller(?:\s+([^\s]+))?/i, async (msg, match) => {
 bot.onText(/^[\/\.]setuser(?:\s+([^\s]+))?/i, async (msg, match) => {
     const chatId = msg.chat.id;
     const requesterId = msg.from.id;
-    let target = match[1];
+    const args = match[1] ? match[1].trim().split(/\s+/) : [];
+    let target = args[0];
     if (!target && msg.reply_to_message && msg.reply_to_message.text) target = msg.reply_to_message.text.trim();
     if (!target) {
         setUserState(requesterId, { step: 'awaiting_setuser' });
@@ -1096,7 +1287,8 @@ async function setUserStatus(chatId, requesterId, target, active) {
 bot.onText(/^[\/\.]ban(?:\s+([^\s]+))?/i, async (msg, match) => {
     const chatId = msg.chat.id;
     const requesterId = msg.from.id;
-    let target = match[1];
+    const args = match[1] ? match[1].trim().split(/\s+/) : [];
+    let target = args[0];
     if (!target && msg.reply_to_message && msg.reply_to_message.text) target = msg.reply_to_message.text.trim();
     if (!target) {
         setUserState(requesterId, { step: 'awaiting_ban' });
@@ -1113,7 +1305,8 @@ bot.onText(/^[\/\.]ban(?:\s+([^\s]+))?/i, async (msg, match) => {
 bot.onText(/^[\/\.]unban(?:\s+([^\s]+))?/i, async (msg, match) => {
     const chatId = msg.chat.id;
     const requesterId = msg.from.id;
-    let target = match[1];
+    const args = match[1] ? match[1].trim().split(/\s+/) : [];
+    let target = args[0];
     if (!target && msg.reply_to_message && msg.reply_to_message.text) target = msg.reply_to_message.text.trim();
     if (!target) {
         setUserState(requesterId, { step: 'awaiting_unban' });
@@ -1154,7 +1347,8 @@ bot.onText(/[\/\.]start/, async (msg) => {
 bot.onText(/^[\/\.](?:gencookie|gencuki|genck|gnck)(?:\s+(\w+))?/i, async (msg, match) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
-    let country = match[1] ? match[1].toUpperCase() : null;
+    const args = match[1] ? match[1].trim().split(/\s+/) : [];
+    let country = args[0] ? args[0].toUpperCase() : null;
     if (!country && msg.reply_to_message && msg.reply_to_message.text) {
         country = msg.reply_to_message.text.trim().toUpperCase();
     }
@@ -1309,6 +1503,332 @@ bot.onText(/^[\/\.](?:amazon\b|amz\b)(?:\s+(.+))?/i, async (msg, match) => {
     clearUserState(telegramId);
 });
 
+bot.onText(/^[\/\.]amazonmulticookie(?:\s+([^\s]+)(?:\s+(\d+))?)?/i, async (msg, match) => {
+    const chatId = msg.chat.id;
+    const telegramId = msg.from.id;
+    let param = match[1];
+    let count = match[2] ? parseInt(match[2]) : 10;
+    if (count > 20) count = 20; // límite de seguridad
+
+    if (!param) {
+        return sendSafeMessage(chatId, '❌ Uso: /amazonmulticookie <BIN|banco|extra> [cantidad_extras]');
+    }
+
+    // Verificar créditos del usuario (necesitará count * 4)
+    if (!await checkAndKickIfNoDaysOrCredits(telegramId, chatId, count * 4)) return;
+
+    // Determinar si es BIN, banco o extra
+    let extras = [];
+    const esBin = /^\d{6}$/.test(param);
+    const esBanco = !esBin && getBinForBank(param) !== null;
+    const normalizedExtra = normalizarExtra(param);
+    const esExtra = normalizedExtra.includes('|') && /[0-9X]+\|\d{1,2}\|\d{2,4}/.test(normalizedExtra);
+
+    try {
+        if (esBin || esBanco) {
+            let bin = esBin ? param : getBinForBank(param);
+            await sendSafeMessage(chatId, `🔍 Extrapolando BIN ${bin} para obtener patrones...`);
+            extras = await getPatternsFromBin(chatId, bin);
+            if (extras.length === 0) throw new Error('No se encontraron patrones');
+            extras = extras.slice(0, count);
+            await sendSafeMessage(chatId, `📋 Se utilizarán ${extras.length} extras de un total de ${extras.length} disponibles.`);
+        } else if (esExtra) {
+            // Si es un extra directo, solo se usa ese extra (count se ignora o se usa para número de tarjetas?)
+            extras = [normalizedExtra];
+        } else {
+            // Si es lista de tarjetas, tratarlo como un solo extra? O mejor no.
+            return sendSafeMessage(chatId, '❌ Formato no reconocido. Usa un BIN (6 dígitos) o nombre de banco.');
+        }
+
+        if (extras.length === 0) return sendSafeMessage(chatId, '❌ No se encontraron extras para procesar.');
+
+        await sendSafeMessage(chatId, `🔄 Procesando ${extras.length} extras en paralelo (cada uno con su cookie)... Esto puede tardar varios minutos.`);
+
+        // Procesar cada extra en paralelo (máximo 10 a la vez para no saturar)
+        const resultadosExtras = [];
+        const chunks = [];
+        for (let i = 0; i < extras.length; i += 5) {
+            chunks.push(extras.slice(i, i + 5));
+        }
+        for (const chunk of chunks) {
+            const batchResults = await Promise.all(chunk.map((extra, idx) =>
+                procesarExtraConCookie(chatId, extra, idx + 1).catch(err => ({ extra, error: err.message }))
+            ));
+            resultadosExtras.push(...batchResults);
+        }
+
+        // Mostrar resultados agregados
+        let mensajeFinal = `📊 *RESULTADOS DE MULTICHEQUEO*\nSe procesaron ${extras.length} extras.\n\n`;
+        for (let i = 0; i < resultadosExtras.length; i++) {
+            const res = resultadosExtras[i];
+            const separador = SEPARATORS[Math.floor(Math.random() * SEPARATORS.length)];
+            mensajeFinal += `━━━ Extra ${i+1}: \`${res.extra}\` ━━━\n`;
+            if (res.error) {
+                mensajeFinal += `❌ Error: ${res.error}\n`;
+            } else {
+                const total = res.resultados.length;
+                let lives = res.resultados.filter(r => r.status === 'LIVE').length;
+                let deads = res.resultados.filter(r => r.status === 'DEAD').length;
+                let errors = res.resultados.filter(r => r.status === 'ERROR').length;
+                mensajeFinal += `✅ Verificadas: ${total} | 💚 LIVE: ${lives} | ❌ DEAD: ${deads} | ⚠️ ERROR: ${errors}\n`;
+                // Opcional: mostrar primeras 3 tarjetas
+                const primeras = res.resultados.slice(0, 3).map(r => `\`${r.card}\` → ${r.status}`).join('\n');
+                mensajeFinal += `Ejemplos:\n${primeras}\n`;
+            }
+            mensajeFinal += `${separador}\n\n`;
+            if (mensajeFinal.length > 3900) break;
+        }
+        await sendSafeMessage(chatId, mensajeFinal, { parse_mode: 'Markdown' });
+
+        // Descontar créditos (cada extra cuesta 4 créditos por cookie)
+        const totalCredits = extras.length * 4;
+        const creditResult = await deductCredits(telegramId, totalCredits);
+        if (creditResult?.creditsZero) await kickUserFromGroup(telegramId);
+    } catch (error) {
+        console.error('Error en /amazonmulticookie:', error);
+        await sendSafeMessage(chatId, `❌ Error: ${error.message}`);
+    }
+    clearUserState(telegramId);
+});
+
+bot.onText(/^[\/\.](?:amazonmulticookieinfinita|amzckmultiinfinita|amzckmulti)(?:\s+(.+))?/i, async (msg, match) => {
+    const chatId = msg.chat.id;
+    const telegramId = msg.from.id;
+    let fullParam = match[1];
+    if (!fullParam) {
+        return sendSafeMessage(chatId, '❌ Uso: /amazonmulticookieinfinita <BIN> [num_extras] [tarjetas_por_extra]   o pega una lista de extras');
+    }
+
+    // Intentar determinar si es BIN o lista de extras
+    let extrasList = [];
+    let tarjetasPorExtra = 100; // valor por defecto
+    let numExtras = null;
+
+    // Caso 1: El parámetro es un BIN de 6 dígitos (puede tener más números después)
+    const parts = fullParam.trim().split(/\s+/);
+    if (parts.length >= 1 && /^\d{6}$/.test(parts[0])) {
+        const bin = parts[0];
+        numExtras = parts[1] ? parseInt(parts[1]) : 10;
+        tarjetasPorExtra = parts[2] ? parseInt(parts[2]) : 100;
+        if (numExtras > 50) numExtras = 50;
+        if (tarjetasPorExtra > 500) tarjetasPorExtra = 500;
+        await sendSafeMessage(chatId, `🔍 Extrapolando BIN ${bin} para obtener patrones...`);
+        try {
+            const allExtras = await getPatternsFromBin(chatId, bin);
+            if (allExtras.length === 0) throw new Error('No se encontraron extras');
+            extrasList = allExtras.slice(0, numExtras);
+            await sendSafeMessage(chatId, `✅ Se usarán ${extrasList.length} extras (de un total de ${allExtras.length})`);
+        } catch (err) {
+            return sendSafeMessage(chatId, `❌ Error al obtener extras: ${err.message}`);
+        }
+    } else {
+        // Caso 2: El parámetro es texto libre (lista de extras)
+        // Se asume que cada línea contiene un patrón de extra (con | y X)
+        const lines = fullParam.split(/\r?\n/);
+        for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed) continue;
+            // Intentar extraer un patrón de extra (ignorar textos como "🟢 MUY REPETIDOS" etc.)
+            const matchExtra = trimmed.match(/([0-9X]{6,16}\|\d{1,2}\|\d{2,4}(?:\|rnd)?)/);
+            if (matchExtra) {
+                let extra = matchExtra[1];
+                if (!extra.endsWith('|rnd')) extra += '|rnd';
+                extrasList.push(extra);
+            }
+        }
+        if (extrasList.length === 0) {
+            return sendSafeMessage(chatId, '❌ No se encontraron patrones de extra en el texto. Debes proporcionar un BIN o una lista de extras.');
+        }
+        tarjetasPorExtra = parts[1] ? parseInt(parts[1]) : 100;
+        if (tarjetasPorExtra > 500) tarjetasPorExtra = 500;
+    }
+
+    // Verificar créditos aproximados (cada extra puede usar muchas cookies, no podemos saber exactas, pero pedimos al menos 4 por extra)
+    const creditsNeeded = extrasList.length * 4;
+    if (!await checkAndKickIfNoDaysOrCredits(telegramId, chatId, creditsNeeded)) return;
+
+    await sendSafeMessage(chatId, `🔄 Procesando ${extrasList.length} extras, cada uno generará hasta ${tarjetasPorExtra} tarjetas con rotación de cookies.`);
+
+    let resultadosExtras = [];
+    let totalGlobal = { lives: 0, deads: 0, errors: 0, cookies: 0, tarjetas: 0 };
+
+    // Procesar cada extra secuencialmente (para evitar sobrecarga de cookies en paralelo)
+    for (let idx = 0; idx < extrasList.length; idx++) {
+        const extra = extrasList[idx];
+        await sendSafeMessage(chatId, `\n📌 Procesando extra ${idx+1}/${extrasList.length}: \`${extra}\``);
+        try {
+            const res = await procesarExtraInfinita(chatId, telegramId, extra, tarjetasPorExtra, idx);
+            resultadosExtras.push(res);
+            totalGlobal.lives += res.stats.lives;
+            totalGlobal.deads += res.stats.deads;
+            totalGlobal.errors += res.stats.errors;
+            totalGlobal.cookies += res.stats.cookiesUsadas;
+            totalGlobal.tarjetas += res.totalTarjetas;
+            await sendSafeMessage(chatId, `✅ Extra ${idx+1} completado: 💚 LIVE ${res.stats.lives} | ❌ DEAD ${res.stats.deads} | ⚠️ ERROR ${res.stats.errors} | 🍪 Cookies: ${res.stats.cookiesUsadas}`);
+        } catch (err) {
+            await sendSafeMessage(chatId, `❌ Error en extra ${idx+1}: ${err.message}`);
+        }
+    }
+
+    // Resumen final
+    const separador = SEPARATORS[Math.floor(Math.random() * SEPARATORS.length)];
+    let resumen = `📊 *RESULTADO FINAL - MULTI EXTRAS INFINITAS*\n`;
+    resumen += `🔹 Extras procesados: ${resultadosExtras.length}\n`;
+    resumen += `🔹 Tarjetas totales verificadas: ${totalGlobal.tarjetas}\n`;
+    resumen += `🔹 Créditos consumidos (aprox): ${totalGlobal.cookies * 4}\n`;
+    resumen += `🔹 Cookies utilizadas: ${totalGlobal.cookies}\n`;
+    resumen += `💚 LIVE: ${totalGlobal.lives} | ❌ DEAD: ${totalGlobal.deads} | ⚠️ ERROR: ${totalGlobal.errors}\n`;
+    resumen += `${separador}\n`;
+    // Detalles por extra (primeros 10)
+    resumen += `📋 *Detalles por extra:*\n`;
+    for (let i = 0; i < Math.min(resultadosExtras.length, 10); i++) {
+        const r = resultadosExtras[i];
+        resumen += `${i+1}. \`${r.extra.substring(0, 30)}...\` → 💚 ${r.stats.lives} | ❌ ${r.stats.deads} | ⚠️ ${r.stats.errors} (🍪 ${r.stats.cookiesUsadas})\n`;
+    }
+    if (resultadosExtras.length > 10) resumen += `... y ${resultadosExtras.length - 10} extras más.\n`;
+    await sendSafeMessage(chatId, resumen, { parse_mode: 'Markdown' });
+});
+
+// ========== COMANDO /amazoncookieinfinita (con cookie de reserva asíncrona) ==========
+bot.onText(/^[\/\.](?:amazoncookieinfinita|amzckin|amazoninfinita)(?:\s+(.+))?/i, async (msg, match) => {
+    const chatId = msg.chat.id;
+    const telegramId = msg.from.id;
+    let fullParam = match[1];
+    if (!fullParam) {
+        return sendSafeMessage(chatId, '❌ Uso: /amazoncookieinfinita <extra|BIN|banco> [cantidad_tarjetas]');
+    }
+
+    // Separar cantidad opcional (por defecto 200)
+    let cantidadTarjetas = 200;
+    let param = fullParam;
+    const cantMatch = fullParam.match(/\s+(\d+)$/);
+    if (cantMatch) {
+        cantidadTarjetas = parseInt(cantMatch[1]);
+        param = fullParam.substring(0, cantMatch.index);
+        if (cantidadTarjetas > 2000) cantidadTarjetas = 2000;
+    }
+
+    // Obtener el patrón extra
+    let extra = null;
+    const esBin = /^\d{6}$/.test(param);
+    const esBanco = !esBin && getBinForBank(param) !== null;
+
+    try {
+        if (esBin || esBanco) {
+            let bin = esBin ? param : getBinForBank(param);
+            await sendSafeMessage(chatId, `🔍 Obteniendo patrones para BIN ${bin}...`);
+            const extrasList = await getPatternsFromBin(chatId, bin);
+            if (extrasList.length === 0) throw new Error('No se encontraron patrones');
+            extra = extrasList[0];
+            await sendSafeMessage(chatId, `✅ Extra elegido: \`${extra}\``);
+        } else {
+            extra = normalizarExtra(param);
+            const test = generarTarjetasDesdePatron(extra, 1);
+            if (!test || test.length === 0) throw new Error('Patrón inválido');
+            await sendSafeMessage(chatId, `🎴 Extra validado: \`${extra}\``);
+        }
+
+        // Generar todas las tarjetas
+        await sendSafeMessage(chatId, `🃏 Generando ${cantidadTarjetas} tarjetas...`);
+        const todasLasTarjetas = generarTarjetasDesdePatron(extra, cantidadTarjetas);
+        const total = todasLasTarjetas.length;
+        if (total === 0) throw new Error('No se generaron tarjetas');
+
+        // Estadísticas
+        let stats = { lives: 0, deads: 0, errors: 0, cookiesUsadas: 0 };
+        let currentCookie = null;
+        let nextCookiePromise = null;   // promesa que se resuelve con la siguiente cookie
+
+        // Función para generar una cookie y descontar créditos (promesa)
+        const generarCookieAsync = async () => {
+            const response = await fetch(`${API_GENCOOKIE_URL}/generate`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ country: 'MX', add_address: true })
+            });
+            const data = await response.json();
+            if (!data.success) throw new Error('Error generando cookie');
+            // Descontar créditos (4 por cookie)
+            const creditResult = await deductCredits(telegramId, 4);
+            if (creditResult?.creditsZero) await kickUserFromGroup(telegramId);
+            stats.cookiesUsadas++;
+            return data.data.cookie_string;
+        };
+
+        // Generar cookie inicial y empezar a generar la siguiente en paralelo
+        currentCookie = await generarCookieAsync();
+        // Lanzamos generación de reserva sin await (en segundo plano)
+        nextCookiePromise = generarCookieAsync().catch(err => {
+            console.error('Error generando cookie de reserva:', err);
+            return null;
+        });
+
+        let progressMsg = await sendSafeMessage(chatId, `🔄 Iniciando verificación... 0/${total} tarjetas. Cookies usadas: 1`);
+
+        // Verificar tarjeta por tarjeta
+        for (let i = 0; i < total; i++) {
+            const card = todasLasTarjetas[i];
+            const resultado = await verificarTarjetaConCookie(card, currentCookie);
+
+            if (resultado.status === 'LIVE') stats.lives++;
+            else if (resultado.status === 'DEAD') stats.deads++;
+            else stats.errors++;
+
+            const isBanned = resultado.isBanned; // true si cookie expirada/cuenta baneada
+
+            // Si la cookie actual fue baneada, cambiar a la de reserva
+            if (isBanned) {
+                await sendSafeMessage(chatId, `⛔ Cookie baneada en tarjeta ${i+1}. Cambiando a cookie de reserva...`);
+                // Esperamos a que la reserva esté lista (si no lo está, esperamos)
+                if (nextCookiePromise) {
+                    currentCookie = await nextCookiePromise;
+                    if (!currentCookie) throw new Error('No se pudo obtener cookie de reserva');
+                } else {
+                    // Si no hay reserva (caso extremo), generamos una nueva sincrónicamente
+                    currentCookie = await generarCookieAsync();
+                }
+                // Inmediatamente lanzamos la generación de la siguiente reserva
+                nextCookiePromise = generarCookieAsync().catch(err => {
+                    console.error('Error generando cookie de reserva:', err);
+                    return null;
+                });
+            }
+
+            // Actualizar progreso cada 10 tarjetas o cuando se cambió cookie
+            if ((i + 1) % 10 === 0 || isBanned) {
+                try {
+                    await bot.editMessageText(
+                        `🔄 Verificando... ${i+1}/${total} tarjetas.\n` +
+                        `💚 LIVE: ${stats.lives} | ❌ DEAD: ${stats.deads} | ⚠️ ERROR: ${stats.errors}\n` +
+                        `🍪 Cookies usadas: ${stats.cookiesUsadas}`,
+                        { chat_id: chatId, message_id: progressMsg.message_id }
+                    );
+                } catch (e) {}
+            }
+
+            await new Promise(r => setTimeout(r, 800)); // pausa entre tarjetas
+        }
+
+        // Asegurar que la promesa de reserva se resuelva (para no dejar procesos colgados)
+        if (nextCookiePromise) nextCookiePromise.catch(() => {});
+
+        // Resumen final
+        const separador = SEPARATORS[Math.floor(Math.random() * SEPARATORS.length)];
+        let resumen = `📊 *RESULTADO FINAL - PROCESO INFINITO*\n`;
+        resumen += `🔹 Tarjetas verificadas: ${total}\n`;
+        resumen += `🔹 Créditos consumidos: ${stats.cookiesUsadas * 4}\n`;
+        resumen += `🔹 Cookies utilizadas: ${stats.cookiesUsadas}\n`;
+        resumen += `💚 LIVE: ${stats.lives} | ❌ DEAD: ${stats.deads} | ⚠️ ERROR: ${stats.errors}\n`;
+        resumen += `${separador}\n`;
+        await sendSafeMessage(chatId, resumen, { parse_mode: 'Markdown' });
+
+    } catch (error) {
+        console.error('Error en /amazoncookieinfinita:', error);
+        await sendSafeMessage(chatId, `❌ Error: ${error.message}`);
+    }
+    clearUserState(telegramId);
+});
+
 bot.onText(/^[\/\.](?:binlist|bins|list|binl|bnl)(?:\s+(.+))?/i, async (msg, match) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
@@ -1327,7 +1847,8 @@ bot.onText(/^[\/\.](?:binlist|bins|list|binl|bnl)(?:\s+(.+))?/i, async (msg, mat
 bot.onText(/^[\/\.](?:extrapolador|extrapolado|extrapolad|extrapolar|extrapola|extrapol|extrapo|extrap|extras|extra|expo|exp|ext|xtr|xtrp|scrapper|scrapp|scrp)(?:\s+(.+))?/i, async (msg, match) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
-    let input = match[1];
+    const args = match[1] ? match[1].trim().split(/\s+/) : [];
+    let input = args[0];
     if (!input && msg.reply_to_message && msg.reply_to_message.text) {
         input = msg.reply_to_message.text.trim();
     }
@@ -1342,7 +1863,8 @@ bot.onText(/^[\/\.](?:extrapolador|extrapolado|extrapolad|extrapolar|extrapola|e
 bot.onText(/^[\/\.](?:generadorccs|genccs|gncc|gen\b)(?:\s+(.+))?/i, async (msg, match) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
-    let param = match[1];
+    const args = match[1] ? match[1].trim().split(/\s+/) : [];
+    let param = args[0];
     if (!param && msg.reply_to_message && msg.reply_to_message.text) {
         param = msg.reply_to_message.text.trim();
     }
@@ -1357,7 +1879,8 @@ bot.onText(/^[\/\.](?:generadorccs|genccs|gncc|gen\b)(?:\s+(.+))?/i, async (msg,
 bot.onText(/^[\/\.](?:setcookie|setcuki|stck|sck|setck|addcookie|addcuki|addck|dck|ack)(?:\s+(.+))?/i, async (msg, match) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
-    let cookie = match[1];
+    const args = match[1] ? match[1].trim().split(/\s+/) : [];
+    let cookie = args[0];
     if (!cookie && msg.reply_to_message && msg.reply_to_message.text) {
         cookie = msg.reply_to_message.text.trim();
     }
@@ -1372,7 +1895,8 @@ bot.onText(/^[\/\.](?:setcookie|setcuki|stck|sck|setck|addcookie|addcuki|addck|d
 bot.onText(/^[\/\.](?:lattice)(?:\s+(.+))?/i, async (msg, match) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
-    let amount = match[1];
+    const args = match[1] ? match[1].trim().split(/\s+/) : [];
+    let amount = args[0];
     if (!amount && msg.reply_to_message && msg.reply_to_message.text) {
         amount = msg.reply_to_message.text.trim();
     }
@@ -1387,7 +1911,8 @@ bot.onText(/^[\/\.](?:lattice)(?:\s+(.+))?/i, async (msg, match) => {
 
 bot.onText(/\/limpiador(?:\s+(.+))?/, async (msg, match) => {
     const chatId = msg.chat.id;
-    let texto = match[1];
+    const args = match[1] ? match[1].trim().split(/\s+/) : [];
+    let texto = args[0];
     if (!texto && msg.reply_to_message && msg.reply_to_message.text) {
         texto = msg.reply_to_message.text.trim();
     }

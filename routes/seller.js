@@ -6,6 +6,8 @@ const User = require('../models/User');
 
 const allowBot = (req, res, next) => {
     const botKey = req.headers['x-bot-key'];
+    console.log('[allowBot] Header x-bot-key:', botKey, 'vs', BOT_API_KEY);
+
     if (botKey && botKey === BOT_API_KEY) {
         // Asignar un usuario ficticio con rol admin para que pase las validaciones
         req.user = { id: 0, role: 'admin', is_active: true, credits: 999999 };
