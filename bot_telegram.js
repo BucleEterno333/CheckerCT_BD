@@ -1335,6 +1335,7 @@ bot.onText(/[\/\.]start/, async (msg) => {
             await sendSafeMessage(chatId,
                 `👋 ¡Hola ${firstName}! 👋\n\nHe guardado tu Chat ID: <code>${telegramId}</code>\n\nRegístrate en la web: https://astralchk.com/login.html con usuario @${username}`, { parse_mode: 'HTML' });
         } else {
+
             await sendSafeMessage(chatId,
                 `👋 ¡Hola ${firstName}!\n💰 Créditos: ${existing.credits}\n📅 Días: ${existing.days_remaining}\n\nUsa /menu para ver comandos.`, { parse_mode: 'Markdown' });
         }
