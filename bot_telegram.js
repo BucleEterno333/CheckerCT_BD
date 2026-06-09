@@ -1157,24 +1157,17 @@ bot.onText(/\/help/, async (msg) => {
         `🔹 *Generación de cookies*\n` +
         `/gencookie [país] - Genera cookie (4 créditos)\n` +
         `   País: MX, US, CA, UK, DE, FR, IT, ES, JP, AU, IN\n` +
-        `   Alias: /gencuki, /genck, /gnck\n` +
         `/setcookie [cookie] - Guarda una cookie manualmente\n` +
-        `   Alias: /setcuki, /stck, /sck, /setck, /addcookie, /addcuki, /addck, /dck, /ack\n\n` +
         
         `🔹 *Búsqueda y extrapolación*\n` +
         `/binlist [banco|país] - Lista bins de un banco o país\n` +
-        `   Alias: /bins, /list, /binl, /bnl\n` +
         `/extrapolador [banco|país|bin] - Extrae patrones desde un BIN o banco (10 créditos)\n` +
-        `   Alias: /extrapolado, /extrapolar, /extra, /scrapper, /scrapp, /scrp, /xtr, etc.\n` +
         `/gen [banco|país|bin|extra] - Genera tarjetas desde un patrón, BIN o banco (4 créditos)\n` +
-        `   Alias: /generadorccs, /genccs, /gncc\n` +
         `   Ejemplo: /gen 481515310022xxxx|09|2029|rnd 20\n\n` +
         
         `🔹 *Verificación en Amazon*\n` +
         `/amazon [banco|país|bin|extra|tarjetas] - Verifica tarjetas con la cookie guardada\n` +
-        `   Alias: /amz\n` +
         `/amazoncookie [banco|país|bin|extra|tarjetas] - Genera cookie nueva y verifica (4 créditos)\n` +
-        `   Alias: /amazoncuki, /amazonck, /amzck\n\n` +
         
         `🔹 *Otras herramientas*\n` +
         `/lattice [monto] - Gate charged (1 crédito por dead o live)\n` +
