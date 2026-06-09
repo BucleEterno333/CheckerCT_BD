@@ -1167,14 +1167,14 @@ bot.onText(/\/help/, async (msg) => {
         `/amazon [banco|país|bin|extra|tarjetas] - Verifica tarjetas con la cookie guardada\n` +
         `/amazoncookie [banco|país|bin|extra|tarjetas] - Genera cookie nueva y verifica (4 créditos)\n\n` +
 
-        `🔹 Otros gates *\n` +
-                `/lattice [monto] - Gate charged (1 crédito por dead o live)\n\n` +
-
         `🔹 *Otras herramientas*\n` +
         `/gen [banco|país|bin|extra] - Genera tarjetas desde un patrón, BIN o banco (4 créditos)\n` +
         `   Ejemplo: /gen 481515310022xxxx|09|2029|rnd 20\n` +
         `/limpiador - Extrae tarjetas de texto sucio\n` +
         `   Ejemplo: envía un texto con tarjetas sucias y el bot las limpiará\n\n` +
+
+        `🔹 Otros gates *\n` +
+        `/lattice [monto] - Gate charged (1 crédito por dead o live)\n\n` +
         
         `📌 *Formatos aceptados:*\n` +
         `• Extra: 16 dígitos con X (ej. 481515310022xxxx|09|2029|rnd)\n` +
