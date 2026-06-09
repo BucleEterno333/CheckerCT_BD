@@ -651,7 +651,7 @@ async function handleGenCookieCommand(chatId, telegramId, country) {
     await sendSafeMessage(chatId, `🔄 Generando cookie para ${country}...`);
     try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 300000);
+        const timeoutId = setTimeout(() => controller.abort(), 600000);
         const response = await fetch(`${API_GENCOOKIE_URL}/generate`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ country, add_address: true }), signal: controller.signal
         });
