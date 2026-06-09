@@ -67,12 +67,12 @@ function getBinForBank(bankName) {
     return null;
 }
 
-function getCommandParam(msg, command) {
+function getCommandParam(msg, commandName) {
     const text = msg.text;
-    const prefix = `/${command}`;
+    const prefix = `/${commandName}`;
     if (text.startsWith(prefix)) {
         let param = text.substring(prefix.length).trim();
-        if (param === '') param = null;
+        if (param === '') return null;
         return param;
     }
     return null;
@@ -904,12 +904,13 @@ bot.onText(/^\/(?:gencookie|gencuki|genck|gnck)(?:\s+(\w+))?/i, async (msg, matc
     clearUserState(telegramId);
 });
 
-bot.onText(/^\/(?:amazoncookie|amazoncuki|amazonck|amzck)(?:\s+(.+))?/i, async (msg, match) => {
+bot.onText(/^\/(?:amazoncookie|amazoncuki|amazonck|amzck)/i, async (msg) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
-    let param = getCommandParam(msg, 'amazoncookie') || getCommandParam(msg, 'amazoncuki') || getCommandParam(msg, 'amazonck') || getCommandParam(msg, 'amzck');    
-    // Limpiar caracteres ocultos
-    if (param) param = param.replace(/[\n\r\t]+/g, ' ').trim();
+    let param = getCommandParam(msg, 'amazoncookie') || getCommandParam(msg, 'amazoncuki') || getCommandParam(msg, 'amazonck') || getCommandParam(msg, 'amzck');
+    
+    // Solo limpiar espacios al inicio/final, NO eliminar saltos de línea
+    if (param) param = param.trim();
     if (param === '') param = null;
     
     clearUserState(telegramId);
@@ -936,7 +937,7 @@ bot.onText(/^\/(?:amazoncookie|amazoncuki|amazonck|amzck)(?:\s+(.+))?/i, async (
     }
     
     // Caso 2: Con parámetro → detectar qué es y procesar
-    // Primero, intentar limpiar tarjetas completas (si el parámetro contiene varias líneas o tarjetas)
+    // Primero, intentar limpiar tarjetas completas (el parámetro conserva los saltos de línea)
     let tarjetas = limpiarTarjetas(param);
     let esBin = /^\d{6}$/.test(param);
     let esBanco = !esBin && getBinForBank(param) !== null;
@@ -1036,7 +1037,6 @@ bot.onText(/^\/(?:amazoncookie|amazoncuki|amazonck|amzck)(?:\s+(.+))?/i, async (
         await sendSafeMessage(chatId, `❌ Error: ${err.message}`);
     }
 });
-
 
 bot.onText(/^\/(?:amazon\b|amz\b)(?:\s+(.+))?/i, async (msg, match) => {
     const chatId = msg.chat.id;
