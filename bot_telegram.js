@@ -80,13 +80,26 @@ async function prepararExtrapolacion(chatId, telegramId, param) {
     
     if (esBin) {
         await sendSafeMessage(chatId, `🔮 Extrapolando BIN ${param}...`);
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 400000);
-        const response = await fetch(`${API_EXTRAPOLADOR_URL}/api/search-bin`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ bin: param }), signal: controller.signal
-        });
-        clearTimeout(timeoutId);
-        const data = await response.json();
+
+
+        let attempts = 0;
+        let data = null;
+        while (attempts < 3 && !data) {
+            try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 420000);
+                const response = await fetch(`${API_EXTRAPOLADOR_URL}/api/search-bin`, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ bin: param }), signal: controller.signal
+                });
+                clearTimeout(timeoutId);
+                data = await response.json();
+                if (data.success && data.data.length > 0) break;
+            } catch (err) {
+                attempts++;
+                if (attempts >= 3) throw err;
+                await new Promise(r => setTimeout(r, 2000)); // espera 2 segundos antes de reintentar
+            }
+        }
         if (!data.success || !data.data.length) throw new Error('Sin resultados');
         
         const patrones = {};
@@ -506,7 +519,9 @@ async function handleExtrapoladorCommand(chatId, telegramId, input) {
         if (muy.length) {
             mensaje += `🟢 MUY REPETIDOS (${muy.length}):\n`;
             for (const p of muy.slice(0,15)) {
-                const [prefix, mes, año] = p.patron.split('|');
+                const [prefixWithX, mes, año] = p.patron.split('|');
+                // prefixWithX tiene formato "12digitos+xxxx", extraemos solo los 12 primeros
+                const prefix = prefixWithX.slice(0, 12);
                 mensaje += `\`${prefix}xxxx|${mes}|${año}|rnd\` (${p.count} veces)\n`;
             }
             mensaje += `\n`;
