@@ -36,11 +36,11 @@ bot.getMe().then(me => {
 
 // ========== SEPARADORES BONITOS ==========
 const SEPARATORS = [
-    '﹌﹌﹌﹌﹌﹌﹌﹌' ,
-    '𓆩༺✧༻‧༺✧༻‧༺✧',
-    '₊‿︵‿︵‿︵‿︵',
-    '⋆.ೃ࿔*:･⋆.ೃ࿔*:･⋆.',
-    '་༘.ೃ࿔ᥫ᭡.⋆་༘.ೃ࿔ᥫ᭡.⋆',
+    '﹌﹌﹌﹌﹌﹌﹌﹌﹌﹌﹌﹌﹌﹌﹌﹌﹌' ,
+    '𓆩༺✧༻‧༺✧༻‧༺✧༻‧༺✧༻‧༺✧༻‧༺✧༻',
+    '₊‿︵‿︵‿︵‿︵‿︵‿︵‿︵‿︵‿︵',
+    '⋆.ೃ࿔*:･⋆.ೃ࿔*:･⋆.ೃ࿔*:･⋆.ೃ࿔*:･⋆.ೃ࿔',
+    '་༘.ೃ࿔ᥫ᭡.⋆་༘.ೃ࿔ᥫ᭡.⋆་༘.ೃ࿔ᥫ᭡.⋆་༘.ೃ࿔ᥫ᭡.',
 
 ];
 
@@ -67,6 +67,16 @@ function getBinForBank(bankName) {
     return null;
 }
 
+function getCommandParam(msg, command) {
+    const text = msg.text;
+    const prefix = `/${command}`;
+    if (text.startsWith(prefix)) {
+        let param = text.substring(prefix.length).trim();
+        if (param === '') param = null;
+        return param;
+    }
+    return null;
+}
 
 // Función que solo extrae datos (sin usar cookie) y devuelve { tarjetas, mensajePrevio }
 async function prepararExtrapolacion(chatId, telegramId, param) {
@@ -378,36 +388,29 @@ function calcularDigitoLuhn(numeroParcial) {
 }
 
 function limpiarTarjetas(textoSucio) {
-    // Normalizar saltos de línea y espacios
-    let texto = textoSucio
-        .replace(/\r\n/g, '\n')
-        .replace(/\n+/g, '\n')
-        .trim();
+    // Normalizar saltos de línea
+    let texto = textoSucio.replace(/\r\n/g, '\n').replace(/\n+/g, '\n').trim();
     
-    // Dividir por líneas y procesar cada una
+    // Dividir por líneas y extraer tarjeta de cada línea
     const lineas = texto.split('\n');
     const tarjetas = [];
     
     for (const linea of lineas) {
-        // Buscar patrón en cada línea: 16 dígitos, separador, mes, año, cvv
-        const match = linea.match(/(\d{16})\s*[|│]\s*(\d{2})\s*[|│]\s*(\d{4})\s*[|│]\s*(\d{3})/);
+        // Buscar patrón: 16 dígitos, separador, mes, año, cvv
+        let match = linea.match(/(\d{16})\s*[|│]\s*(\d{2})\s*[|│]\s*(\d{4})\s*[|│]\s*(\d{3})/);
         if (match) {
             tarjetas.push(`${match[1]}|${match[2]}|${match[3]}|${match[4]}`);
+            continue;
         }
-    }
-    
-    // Si no encontró nada, probar con espacios como separadores
-    if (tarjetas.length === 0) {
-        const patronEspacios = /(\d{16})\s+(\d{2})\s+(\d{4})\s+(\d{3})/g;
-        let match;
-        while ((match = patronEspacios.exec(texto)) !== null) {
+        // Si no, probar con espacios como separadores
+        match = linea.match(/(\d{16})\s+(\d{2})\s+(\d{4})\s+(\d{3})/);
+        if (match) {
             tarjetas.push(`${match[1]}|${match[2]}|${match[3]}|${match[4]}`);
         }
     }
     
     return [...new Set(tarjetas)];
 }
-
 function normalizarExtra(texto) {
     let temp = texto.trim();
     // Reemplazar espacios, guiones, barras por pipe, pero evitando pipes dobles
@@ -904,8 +907,7 @@ bot.onText(/^\/(?:gencookie|gencuki|genck|gnck)(?:\s+(\w+))?/i, async (msg, matc
 bot.onText(/^\/(?:amazoncookie|amazoncuki|amazonck|amzck)(?:\s+(.+))?/i, async (msg, match) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
-    let param = match[1] ? match[1].trim() : null;
-    
+    let param = getCommandParam(msg, 'amazoncookie') || getCommandParam(msg, 'amazoncuki') || getCommandParam(msg, 'amazonck') || getCommandParam(msg, 'amzck');    
     // Limpiar caracteres ocultos
     if (param) param = param.replace(/[\n\r\t]+/g, ' ').trim();
     if (param === '') param = null;
@@ -1039,7 +1041,8 @@ bot.onText(/^\/(?:amazoncookie|amazoncuki|amazonck|amzck)(?:\s+(.+))?/i, async (
 bot.onText(/^\/(?:amazon\b|amz\b)(?:\s+(.+))?/i, async (msg, match) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
-    let param = match[1];
+    let param = getCommandParam(msg, 'amazon') || getCommandParam(msg, 'amz');
+
     if (!param) {
         setUserState(telegramId, { step: 'awaiting_amazon_cards' });
         return sendSafeMessage(chatId, '💳 Envía tarjetas, patrón, BIN o nombre de banco:');
