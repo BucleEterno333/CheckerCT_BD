@@ -79,122 +79,31 @@ function getCommandParam(msg, commandName) {
 
 // Función para obtener información del BIN consultando múltiples APIs
 async function getBinInfo(bin) {
-    // Lista de APIs que SÍ funcionan (fuera de binlist.net)
-    const apis = [
-        {
-            name: 'bincodes',
-            url: `https://lookup.bincodes.com/api/?format=json&bin=${bin}`,
-            parser: (data) => ({
-                bank: data.bank_name || null,
-                brand: data.card_brand?.toUpperCase() || null,
-                type: data.card_type?.toUpperCase() || null,
-                level: data.card_level?.toUpperCase() || null,
-                country: data.country_name || null,
-                countryCode: data.country_iso || null
-            })
-        },
-        {
-            name: 'apiverve',
-            url: `https://api.apiverve.com/v1/binlookup?bin=${bin}&apikey=demo-key`,
-            parser: (data) => ({
-                bank: data.data?.issuer || null,
-                brand: data.data?.brand?.toUpperCase() || null,
-                type: data.data?.type?.toUpperCase() || null,
-                level: data.data?.level?.toUpperCase() || null,
-                country: data.data?.country_name || null,
-                countryCode: data.data?.country_code || null
-            })
-        },
-        {
-            name: 'binlist.net',
-            url: `https://lookup.binlist.net/${bin}`,
-            parser: (data) => ({
-                bank: data.bank?.name || null,
-                brand: data.scheme?.toUpperCase() || null,
-                type: data.type?.toUpperCase() || null,
-                level: null,
-                country: data.country?.name || null,
-                countryCode: data.country?.alpha2 || null
-            })
-        },
-        {
-            name: 'neocard',
-            url: `https://neocard.ru/api/v1/bin/${bin}`,
-            parser: (data) => ({
-                bank: data.bank_name || null,
-                brand: data.card_brand?.toUpperCase() || null,
-                type: data.card_type?.toUpperCase() || null,
-                level: data.card_level?.toUpperCase() || null,
-                country: data.country || null,
-                countryCode: data.country_code || null
-            })
-        }
-    ];
-
-    const results = [];
-    for (const api of apis) {
-        for (let attempt = 0; attempt < 2; attempt++) {
-            try {
-                const controller = new AbortController();
-                const timeout = setTimeout(() => controller.abort(), 8000);
-                const res = await fetch(api.url, {
-                    headers: {
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-                    },
-                    signal: controller.signal
-                });
-                clearTimeout(timeout);
-                
-                if (!res.ok) {
-                    console.log(`⚠️ Error en ${api.name}: HTTP ${res.status}`);
-                    continue;
-                }
-                const json = await res.json();
-                const parsed = api.parser(json);
-                // Filtramos resultados vacíos para no contaminar el consenso
-                if (parsed.bank || parsed.brand || parsed.type || parsed.level || parsed.country || parsed.countryCode) {
-                    results.push(parsed);
-                    break;
-                }
-            } catch (err) {
-                console.log(`Error en ${api.name}: ${err.message}`);
-            }
-        }
-    }
-
-    if (results.length === 0) return null;
-
-    // Función para contar coincidencias de un campo
-    function countAgreement(field) {
-        const values = results.map(r => r[field]).filter(v => v && v !== '');
-        if (values.length === 0) return null;
-        const counts = {};
-        values.forEach(v => counts[v] = (counts[v] || 0) + 1);
-        const maxCount = Math.max(...Object.values(counts));
-        // Si hay empate y el empate es de al menos 3, tomamos cualquiera
-        if (maxCount >= 2) {
-            const winner = Object.keys(counts).find(k => counts[k] === maxCount);
-            return { value: winner, count: maxCount };
-        }
+    try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 8000);
+        const res = await fetch(`https://lookup.binlist.net/${bin}`, {
+            headers: { 'User-Agent': 'Mozilla/5.0' },
+            signal: controller.signal
+        });
+        clearTimeout(timeout);
+        
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        
+        return {
+            bin: bin,
+            bank: data.bank?.name || 'Desconocido',
+            brand: data.scheme?.toUpperCase() || 'Desconocido',
+            type: data.type?.toUpperCase() || 'Desconocido',
+            level: data.level?.toUpperCase() || 'Desconocido',
+            country: data.country?.name || 'Desconocido',
+            countryCode: data.country?.alpha2 || ''
+        };
+    } catch (err) {
+        console.error(`Error consultando BIN ${bin}:`, err.message);
         return null;
     }
-
-    const bankAgree = countAgreement('bank');
-    const brandAgree = countAgreement('brand');
-    const typeAgree = countAgreement('type');
-    const levelAgree = countAgreement('level');
-    const countryAgree = countAgreement('country');
-    const countryCodeAgree = countAgreement('countryCode');
-
-    return {
-        bin,
-        bank: bankAgree?.value || 'Desconocido',
-        brand: brandAgree?.value || 'Desconocido',
-        type: typeAgree?.value || 'Desconocido',
-        level: levelAgree?.value || 'Desconocido',
-        country: countryAgree?.value || 'Desconocido',
-        countryCode: countryCodeAgree?.value || '',
-    };
 }
 
 // ========== FIN NUEVA FUNCIÓN ==========
