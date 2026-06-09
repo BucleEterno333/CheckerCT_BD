@@ -378,26 +378,29 @@ function calcularDigitoLuhn(numeroParcial) {
 }
 
 function limpiarTarjetas(textoSucio) {
-    const textoLimpio = textoSucio
-        .replace(/[\u200b\u2060\u200C\u200D\uFEFF]/g, '')
+    // Normalizar saltos de línea y espacios
+    let texto = textoSucio
         .replace(/\r\n/g, '\n')
         .replace(/\n+/g, '\n')
         .trim();
     
-    // Patrón que captura tarjetas en cualquier línea (16 dígitos, barra o espacio, mes, año, cvv)
-    const patron = /(\d{16})\s*[|│]\s*(\d{2})\s*[|│]\s*(\d{4})\s*[|│]\s*(\d{3})/g;
+    // Dividir por líneas y procesar cada una
+    const lineas = texto.split('\n');
     const tarjetas = [];
-    let match;
-    while ((match = patron.exec(textoLimpio)) !== null) {
-        const [_, num, mes, año, cvv] = match;
-        // Asegurar año de 4 dígitos (ya viene con 4)
-        tarjetas.push(`${num}|${mes}|${año}|${cvv}`);
+    
+    for (const linea of lineas) {
+        // Buscar patrón en cada línea: 16 dígitos, separador, mes, año, cvv
+        const match = linea.match(/(\d{16})\s*[|│]\s*(\d{2})\s*[|│]\s*(\d{4})\s*[|│]\s*(\d{3})/);
+        if (match) {
+            tarjetas.push(`${match[1]}|${match[2]}|${match[3]}|${match[4]}`);
+        }
     }
     
-    // Si no encontró con el patrón principal, probar con espacios o guiones
+    // Si no encontró nada, probar con espacios como separadores
     if (tarjetas.length === 0) {
-        const patron2 = /(\d{16})\s+(\d{2})\s+(\d{4})\s+(\d{3})/g;
-        while ((match = patron2.exec(textoLimpio)) !== null) {
+        const patronEspacios = /(\d{16})\s+(\d{2})\s+(\d{4})\s+(\d{3})/g;
+        let match;
+        while ((match = patronEspacios.exec(texto)) !== null) {
             tarjetas.push(`${match[1]}|${match[2]}|${match[3]}|${match[4]}`);
         }
     }
@@ -902,13 +905,14 @@ bot.onText(/^\/(?:amazoncookie|amazoncuki|amazonck|amzck)(?:\s+(.+))?/i, async (
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
     let param = match[1] ? match[1].trim() : null;
-    // Eliminar caracteres invisibles (saltos de línea, tabulaciones, etc.)
+    
+    // Limpiar caracteres ocultos
     if (param) param = param.replace(/[\n\r\t]+/g, ' ').trim();
     if (param === '') param = null;
-
+    
     clearUserState(telegramId);
-    console.log(`[DEBUG] /amazoncookie param: "${param}"`);
-    // 1. Si no hay parámetro (o solo espacios), pedir datos después de generar cookie
+    
+    // Caso 1: Sin parámetro → generar cookie y luego pedir tarjetas
     if (!param) {
         await sendSafeMessage(chatId, '🍪 Generando nueva cookie...');
         try {
@@ -922,61 +926,49 @@ bot.onText(/^\/(?:amazoncookie|amazoncuki|amazonck|amzck)(?:\s+(.+))?/i, async (
             const creditResult = await deductCredits(telegramId, 4);
             await sendSafeMessage(chatId, `✅ Cookie generada. Créditos restantes: ${creditResult?.newCredits || '?'}.`);
             setUserState(telegramId, { step: 'awaiting_amazon_cards' });
-            await sendSafeMessage(chatId, '💳 Envía tarjetas, patrón, BIN o nombre de banco:');
+            await sendSafeMessage(chatId, '💳 Envía las tarjetas (una por línea o con separadores):');
         } catch (err) {
             await sendSafeMessage(chatId, `❌ Error: ${err.message}`);
         }
         return;
     }
-
-    // 2. Clasificar el parámetro
-    let tarjetas = [];
+    
+    // Caso 2: Con parámetro → detectar qué es y procesar
+    // Primero, intentar limpiar tarjetas completas (si el parámetro contiene varias líneas o tarjetas)
+    let tarjetas = limpiarTarjetas(param);
     let esBin = /^\d{6}$/.test(param);
     let esBanco = !esBin && getBinForBank(param) !== null;
-    let esExtra = false;
-    let esTarjetas = false;
-
-    // PRIMERO: Intentar limpiar tarjetas completas (lista de tarjetas)
-    const tarjetasLimp = limpiarTarjetas(param);
-    if (tarjetasLimp.length > 0) {
-        esTarjetas = true;
-        tarjetas = tarjetasLimp;
+    
+    if (tarjetas.length > 0) {
+        // Son tarjetas completas
         if (tarjetas.length > 20) return sendSafeMessage(chatId, `⚠️ Máximo 20 tarjetas.`);
-        // Mostrar solo UNA vez la lista completa
         await sendSafeMessage(chatId, `💳 *Tarjetas a verificar (${tarjetas.length}):*\n${tarjetas.map(t => `\`${t}\``).join('\n')}`, { parse_mode: 'Markdown' });
-    }
-    // SEGUNDO: Si no hay tarjetas completas, probar como extra
-    else if (!esBin && !esBanco) {
+        // Generar cookie y verificar
+        await sendSafeMessage(chatId, '🍪 Generando cookie para verificación...');
         try {
-            const normalized = normalizarExtra(param);
-            const testTarjetas = generarTarjetasDesdePatron(normalized, 1);
-            if (testTarjetas && testTarjetas.length > 0) {
-                esExtra = true;
-                tarjetas = generarTarjetasDesdePatron(normalized, 20);
-                await sendSafeMessage(chatId, `🎴 *Tarjetas generadas (${tarjetas.length}):*\n${tarjetas.slice(0,20).map(t => `\`${t}\``).join('\n')}`, { parse_mode: 'Markdown' });
-            }
-        } catch (e) {}
-    }
-
-    // Si no es extra, intentar limpiar tarjetas completas
-    if (!esExtra && !esBin && !esBanco) {
-        const tarjetasLimp = limpiarTarjetas(param);
-        if (tarjetasLimp.length > 0) {
-            esTarjetas = true;
-            tarjetas = tarjetasLimp;
-            if (tarjetas.length > 20) return sendSafeMessage(chatId, `⚠️ Máximo 20 tarjetas.`);
-            await sendSafeMessage(chatId, `💳 *Tarjetas a verificar:*\n${tarjetas.map(t => `\`${t}\``).join('\n')}`, { parse_mode: 'Markdown' });
+            const response = await fetch(`${API_GENCOOKIE_URL}/generate`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ country: 'MX', add_address: true })
+            });
+            const data = await response.json();
+            if (!data.success) throw new Error('Error al generar cookie');
+            const cookie = data.data.cookie_string;
+            await updateUserCookie(telegramId, cookie);
+            const creditResult = await deductCredits(telegramId, 4);
+            await sendSafeMessage(chatId, `✅ Cookie generada. Créditos restantes: ${creditResult?.newCredits || '?'}.`);
+            await verificarTarjetasConCookie(chatId, cookie, tarjetas, null);
+        } catch (err) {
+            await sendSafeMessage(chatId, `❌ Error al generar cookie: ${err.message}`);
         }
+        return;
     }
-
-    // Si es banco o bin → necesita extrapolación (proceso pesado) → ir a paralelo
+    
+    // Si no son tarjetas, comprobar si es BIN o banco
     if (esBin || esBanco) {
         await sendSafeMessage(chatId, '🔄 Procesando en paralelo: generando cookie y extrapolando...');
         let cookie = null;
         let extrapolation = null;
         let cookieError = null;
         let extrapolationError = null;
-
         try {
             [cookie, extrapolation] = await Promise.all([
                 (async () => {
@@ -1005,7 +997,6 @@ bot.onText(/^\/(?:amazoncookie|amazoncuki|amazonck|amzck)(?:\s+(.+))?/i, async (
                     }
                 })()
             ]);
-
             if (cookieError) throw cookieError;
             if (extrapolationError) throw extrapolationError;
             if (!extrapolation || !extrapolation.tarjetas || extrapolation.tarjetas.length === 0) {
@@ -1017,12 +1008,15 @@ bot.onText(/^\/(?:amazoncookie|amazoncuki|amazonck|amzck)(?:\s+(.+))?/i, async (
         }
         return;
     }
-
-    // Si es extra o tarjetas (ya tenemos las tarjetas en la variable)
-    if (esExtra || esTarjetas) {
-        // Generar cookie y verificar
-        await sendSafeMessage(chatId, '🍪 Generando cookie para verificación...');
-        try {
+    
+    // Último intento: si es un extra (patrón con X)
+    try {
+        const normalized = normalizarExtra(param);
+        const testTarjetas = generarTarjetasDesdePatron(normalized, 1);
+        if (testTarjetas && testTarjetas.length > 0) {
+            tarjetas = generarTarjetasDesdePatron(normalized, 20);
+            await sendSafeMessage(chatId, `🎴 *Tarjetas generadas (${tarjetas.length}):*\n${tarjetas.slice(0,20).map(t => `\`${t}\``).join('\n')}`, { parse_mode: 'Markdown' });
+            await sendSafeMessage(chatId, '🍪 Generando cookie para verificación...');
             const response = await fetch(`${API_GENCOOKIE_URL}/generate`, {
                 method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ country: 'MX', add_address: true })
             });
@@ -1033,15 +1027,12 @@ bot.onText(/^\/(?:amazoncookie|amazoncuki|amazonck|amzck)(?:\s+(.+))?/i, async (
             const creditResult = await deductCredits(telegramId, 4);
             await sendSafeMessage(chatId, `✅ Cookie generada. Créditos restantes: ${creditResult?.newCredits || '?'}.`);
             await verificarTarjetasConCookie(chatId, cookie, tarjetas, null);
-        } catch (err) {
-            await sendSafeMessage(chatId, `❌ Error al generar cookie: ${err.message}`);
+        } else {
+            await sendSafeMessage(chatId, '❌ Formato no reconocido. Envía un BIN, extra o lista de tarjetas.');
         }
-        return;
+    } catch (err) {
+        await sendSafeMessage(chatId, `❌ Error: ${err.message}`);
     }
-
-    // Si nada funcionó
-    await sendSafeMessage(chatId, '❌ Formato no reconocido. Envía un BIN, un extra (ej. 481515310022xxxx|09|2029), o un nombre de banco.');
-    return;
 });
 
 
