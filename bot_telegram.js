@@ -833,6 +833,8 @@ async function handleGenCommand(chatId, telegramId, fullParam) {
             const lista = tarjetas.slice(0,20).map(t => `\`${t}\``).join('\n');
             const resto = tarjetas.length > 20 ? `\n... y ${tarjetas.length-20} más` : '';
             await sendSafeMessage(chatId, `🎴 *Tarjetas generadas (${tarjetas.length}):*\n${lista}${resto}`, { parse_mode: 'Markdown' });
+            const creditResult = await deductCredits(telegramId, 10);
+            if (creditResult?.creditsZero) await kickUserFromGroup(telegramId);
         } else if (esBanco) {
             await sendSafeMessage(chatId, `🔍 Buscando bins de "${input}"...`);
             const binElegido = getBinForBank(input);
@@ -843,8 +845,6 @@ async function handleGenCommand(chatId, telegramId, fullParam) {
         } else {
             throw new Error('No se pudo detectar el formato');
         }
-        const creditResult = await deductCredits(telegramId, 4);
-        if (creditResult?.creditsZero) await kickUserFromGroup(telegramId);
     } catch (error) {
         await sendSafeMessage(chatId, `❌ Error: ${error.message}`);
     }
@@ -1487,6 +1487,12 @@ bot.onText(/^[\/\.](?:amazoncookie|amazoncuki|amazonck|amzck)/i, async (msg) => 
     } catch (err) {
         await sendSafeMessage(chatId, `❌ Error: ${err.message}`);
     }
+});
+
+// ========== COMANDO /GRACIAS ==========
+bot.onText(/^[\/\.]gracias$/i, async (msg) => {
+    const chatId = msg.chat.id;
+    await sendSafeMessage(chatId, "D nada preciosaa (˶ᵔ ᵕ ᵔ˶) ‹𝟹, un placer contruibuir a alcanzar tu autonomía económica, emocional y espiritual ୭ ˚. ᵎᵎ");
 });
 
 bot.onText(/^[\/\.](?:amazon\b|amz\b)(?:\s+(.+))?/i, async (msg, match) => {
