@@ -25,6 +25,9 @@ const API_AMAZON_CHECK_URL = process.env.API_AMAZON_CHECK_URL || 'https://p01--a
 const API_LATTICE_URL = process.env.API_LATTICE_URL || 'https://api.lattice.com/check';
 const GROUP_CHAT_ID = process.env.GROUP_CHAT_ID;
 
+
+
+
 const bot = new TelegramBot(token, { polling: true });
 console.log('🤖 Bot de Telegram mejorado iniciado');
 
@@ -60,7 +63,6 @@ const SEPARATORS = [
     '𓆩༺✧༻‧༺✧༻‧༺✧༻‧༺✧༻‧',
     '₊‿︵‿︵‿︵‿︵‿︵‿︵',
     '⋆.ೃ࿔*:･⋆.ೃ࿔*:･⋆.ೃ࿔*:･⋆.',
-    '་༘.ೃ࿔ᥫ᭡.⋆་༘.ೃ࿔ᥫ᭡.⋆་༘.ೃ࿔ᥫ᭡',
 ];
 
 // Diccionario local de bins por banco
@@ -75,6 +77,26 @@ const bankBins = {
     azteca: ['402766'],
     banorte: ['418914', '493173', '493158', '491566']
 };
+
+
+async function notifyAdminsAndGroups(message, parseMode = 'Markdown') {
+    // Notificar a todos los administradores
+    const adminsRes = await pool.query('SELECT telegram_id FROM users WHERE role = $1 AND telegram_id IS NOT NULL', ['admin']);
+    for (const admin of adminsRes.rows) {
+        if (admin.telegram_id) {
+            try {
+                await bot.sendMessage(admin.telegram_id, message, { parse_mode: parseMode });
+            } catch (err) { console.error('Error notificando admin:', err.message); }
+        }
+    }
+    // Notificar al grupo principal (si está configurado)
+    const GROUP_CHAT_ID = process.env.GROUP_CHAT_ID;
+    if (GROUP_CHAT_ID) {
+        try {
+            await bot.sendMessage(GROUP_CHAT_ID, message, { parse_mode: parseMode });
+        } catch (err) { console.error('Error notificando al grupo:', err.message); }
+    }
+}
 
 // Obtiene los patrones (extras) ordenados por frecuencia para un BIN
 async function getPatternsFromBin(chatId, bin) {
@@ -379,13 +401,22 @@ async function checkAndUpdateTelegramProfile(telegramId, userId, currentUsername
             `UPDATE users SET telegram_username = $1, display_name = $2, updated_at = NOW() WHERE id = $3`,
             [currentUsername, currentFullName, userId]
         );
-        // Si no tienes la tabla profile_change_logs, comenta la siguiente línea
         await pool.query(
             `INSERT INTO profile_change_logs (user_id, old_username, new_username, old_display_name, new_display_name, detected_at)
              VALUES ($1, $2, $3, $4, $5, NOW())`,
             [userId, saved.telegram_username, currentUsername, saved.display_name, currentFullName]
-        ).catch(err => console.error('Error insertando log:', err.message));
-        await notifyAdminsAboutProfileChange(userId, saved, { telegram_username: currentUsername, display_name: currentFullName });
+        );
+        // Notificar a admins Y AL GRUPO
+        const userInfo = await pool.query('SELECT username FROM users WHERE id = $1', [userId]);
+        const username = userInfo.rows[0]?.username || userId;
+        const message = `⚠️ *CAMBIO DE PERFIL DETECTADO* ⚠️\n\n` +
+                        `👤 Usuario: ${username}\n` +
+                        `🆔 ID: ${userId}\n` +
+                        `📱 Telegram ID: ${telegramId}\n\n` +
+                        `📛 Nombre: \`${saved.display_name}\` → \`${currentFullName}\`\n` +
+                        `👥 Username: @${saved.telegram_username || ''} → @${currentUsername || ''}\n\n` +
+                        `🕒 Detectado automáticamente.`;
+        await notifyAdminsAndGroups(message);
         return changes;
     }
     return null;
@@ -521,147 +552,94 @@ async function callApiWithBotKey(endpoint, method, body = null) {
 }
 
 async function findUserByUsernameOrId(identifier, requesterRole) {
-    // Limpiar @ si viene
     if (identifier.startsWith('@')) identifier = identifier.substring(1);
-    
-    // Si es un ID numérico (entero), buscar por ID
+    let query = `SELECT id, username, display_name, credits, days_remaining, role, is_active, created_at, telegram_username, telegram_id FROM users WHERE`;
+    let params = [];
     if (/^\d+$/.test(identifier)) {
-        const userId = parseInt(identifier);
-        const res = await pool.query(
-            `SELECT id, username, display_name, credits, days_remaining, role, is_active, created_at, telegram_username, telegram_id
-             FROM users WHERE id = $1`,
-            [userId]
-        );
-        if (res.rows.length > 0) return res.rows[0];
+        query += ` id = $1`;
+        params.push(parseInt(identifier));
+    } else {
+        query += ` LOWER(username) = LOWER($1) OR LOWER(telegram_username) = LOWER($1)`;
+        params.push(identifier);
     }
-    
-    // Buscar por username (columna username) o telegram_username (case-insensitive)
-    const res = await pool.query(
-        `SELECT id, username, display_name, credits, days_remaining, role, is_active, created_at, telegram_username, telegram_id
-         FROM users 
-         WHERE LOWER(username) = LOWER($1) OR LOWER(telegram_username) = LOWER($1)`,
-        [identifier]
-    );
-    
-    if (res.rows.length === 0) {
-        throw new Error(`Usuario "${identifier}" no encontrado`);
-    }
-    
+    const res = await pool.query(query, params);
+    if (res.rows.length === 0) throw new Error(`Usuario "${identifier}" no encontrado`);
     const user = res.rows[0];
-    
-    // Si el que consulta es seller, solo puede ver usuarios con rol 'user'
     if (requesterRole === 'seller' && user.role !== 'user') {
         throw new Error('No tienes permiso para ver este usuario');
     }
-    
     return user;
 }
-
+// setadmin
 bot.onText(/^[\/\.]setadmin(?:\s+([^\s]+))?/i, async (msg, match) => {
     const chatId = msg.chat.id;
     const requesterId = msg.from.id;
     let target = match[1];
-
-    if (!target && msg.reply_to_message && msg.reply_to_message.text) {
-        target = msg.reply_to_message.text.trim();
-    }
-
-    // Limpiar @ si viene
-    if (target && target.startsWith('@')) target = target.substring(1);
-
+    if (!target && msg.reply_to_message?.text) target = msg.reply_to_message.text.trim();
+    if (target?.startsWith('@')) target = target.substring(1);
     const role = await getUserRoleFromDB(requesterId);
-    if (role !== 'admin') {
-        return sendSafeMessage(chatId, '❌ Solo administradores pueden cambiar roles a ADMIN.');
-    }
-
+    if (role !== 'admin') return sendSafeMessage(chatId, '❌ Solo administradores pueden hacer admins.');
     if (!target) {
         setUserState(requesterId, { step: 'awaiting_setadmin' });
         return sendSafeMessage(chatId, '👑 Envía @usuario o ID para hacerlo administrador:');
     }
-
     try {
         const user = await findUserByUsernameOrId(target, role);
-        if (user.role === 'admin') {
-            return sendSafeMessage(chatId, `⚠️ ${user.username} ya es administrador.`);
-        }
-        await callApiWithBotKey(`/admin/users/${user.id}/role`, 'PUT', { new_role: 'admin' });
+        if (user.role === 'admin') return sendSafeMessage(chatId, `⚠️ ${user.username} ya es admin.`);
+        await pool.query('UPDATE users SET role = $1, updated_at = NOW() WHERE id = $2', ['admin', user.id]);
+        await pool.query(`INSERT INTO credit_transactions (to_user_id, transaction_type, old_role, new_role, reason, created_at)
+                          VALUES ($1, 'role_change', $2, 'admin', 'Ascendido por bot', NOW())`, [user.id, user.role]);
         await sendSafeMessage(chatId, `✅ ${user.username} ahora es ADMINISTRADOR.`);
-    } catch (error) {
-        await sendSafeMessage(chatId, `❌ Error: ${error.message}`);
-    }
+    } catch (error) { await sendSafeMessage(chatId, `❌ Error: ${error.message}`); }
     clearUserState(requesterId);
 });
 
+// setseller
 bot.onText(/^[\/\.]setseller(?:\s+([^\s]+))?/i, async (msg, match) => {
     const chatId = msg.chat.id;
     const requesterId = msg.from.id;
     let target = match[1];
-
-    if (!target && msg.reply_to_message && msg.reply_to_message.text) {
-        target = msg.reply_to_message.text.trim();
-    }
-
-    if (target && target.startsWith('@')) target = target.substring(1);
-
+    if (!target && msg.reply_to_message?.text) target = msg.reply_to_message.text.trim();
+    if (target?.startsWith('@')) target = target.substring(1);
     const role = await getUserRoleFromDB(requesterId);
-    if (role !== 'admin') {
-        return sendSafeMessage(chatId, '❌ Solo administradores pueden cambiar roles a SELLER.');
-    }
-
+    if (role !== 'admin') return sendSafeMessage(chatId, '❌ Solo administradores pueden hacer sellers.');
     if (!target) {
         setUserState(requesterId, { step: 'awaiting_setseller' });
         return sendSafeMessage(chatId, '🛒 Envía @usuario o ID para hacerlo vendedor:');
     }
-
     try {
         const user = await findUserByUsernameOrId(target, role);
-        if (user.role === 'admin') {
-            return sendSafeMessage(chatId, `⚠️ No puedes degradar a un administrador a seller. Usa /setuser para dejarlo como usuario normal.`);
-        }
-        if (user.role === 'seller') {
-            return sendSafeMessage(chatId, `⚠️ ${user.username} ya es vendedor.`);
-        }
-        await callApiWithBotKey(`/admin/users/${user.id}/role`, 'PUT', { new_role: 'seller' });
+        if (user.role === 'admin') return sendSafeMessage(chatId, '⚠️ No puedes degradar a un admin a seller. Usa /setuser primero.');
+        if (user.role === 'seller') return sendSafeMessage(chatId, `⚠️ ${user.username} ya es seller.`);
+        await pool.query('UPDATE users SET role = $1, updated_at = NOW() WHERE id = $2', ['seller', user.id]);
+        await pool.query(`INSERT INTO credit_transactions (to_user_id, transaction_type, old_role, new_role, reason, created_at)
+                          VALUES ($1, 'role_change', $2, 'seller', 'Ascendido por bot', NOW())`, [user.id, user.role]);
         await sendSafeMessage(chatId, `✅ ${user.username} ahora es SELLER.`);
-    } catch (error) {
-        await sendSafeMessage(chatId, `❌ Error: ${error.message}`);
-    }
+    } catch (error) { await sendSafeMessage(chatId, `❌ Error: ${error.message}`); }
     clearUserState(requesterId);
 });
 
-
-
+// setuser (degradar)
 bot.onText(/^[\/\.]setuser(?:\s+([^\s]+))?/i, async (msg, match) => {
     const chatId = msg.chat.id;
     const requesterId = msg.from.id;
     let target = match[1];
-
-    if (!target && msg.reply_to_message && msg.reply_to_message.text) {
-        target = msg.reply_to_message.text.trim();
-    }
-
-    if (target && target.startsWith('@')) target = target.substring(1);
-
+    if (!target && msg.reply_to_message?.text) target = msg.reply_to_message.text.trim();
+    if (target?.startsWith('@')) target = target.substring(1);
     const role = await getUserRoleFromDB(requesterId);
-    if (role !== 'admin') {
-        return sendSafeMessage(chatId, '❌ Solo administradores pueden degradar roles.');
-    }
-
+    if (role !== 'admin') return sendSafeMessage(chatId, '❌ Solo administradores pueden degradar.');
     if (!target) {
         setUserState(requesterId, { step: 'awaiting_setuser' });
         return sendSafeMessage(chatId, '👤 Envía @usuario o ID para dejarlo como usuario normal:');
     }
-
     try {
         const user = await findUserByUsernameOrId(target, role);
-        if (user.role === 'user') {
-            return sendSafeMessage(chatId, `⚠️ ${user.username} ya es usuario normal.`);
-        }
-        await callApiWithBotKey(`/admin/users/${user.id}/role`, 'PUT', { new_role: 'user' });
+        if (user.role === 'user') return sendSafeMessage(chatId, `⚠️ ${user.username} ya es usuario normal.`);
+        await pool.query('UPDATE users SET role = $1, updated_at = NOW() WHERE id = $2', ['user', user.id]);
+        await pool.query(`INSERT INTO credit_transactions (to_user_id, transaction_type, old_role, new_role, reason, created_at)
+                          VALUES ($1, 'role_change', $2, 'user', 'Degradado por bot', NOW())`, [user.id, user.role]);
         await sendSafeMessage(chatId, `✅ ${user.username} ahora es USUARIO NORMAL.`);
-    } catch (error) {
-        await sendSafeMessage(chatId, `❌ Error: ${error.message}`);
-    }
+    } catch (error) { await sendSafeMessage(chatId, `❌ Error: ${error.message}`); }
     clearUserState(requesterId);
 });
 
@@ -1312,6 +1290,8 @@ bot.onText(/^[\/\.]setadmin(?:\s+([^\s]+))?/i, async (msg, match) => {
         await sendSafeMessage(chatId, `❌ Error: ${error.message}`);
     }
     clearUserState(requesterId);
+
+    await notifyAdminsAndGroups(`👑 *NUEVO ADMINISTRADOR*\n👤 ${user.username} ahora es ADMIN.\n👮‍♂️ Por: ${msg.from.username || msg.from.id}`);
 });
 
 bot.onText(/^[\/\.]setseller(?:\s+([^\s]+))?/i, async (msg, match) => {
@@ -1330,6 +1310,8 @@ bot.onText(/^[\/\.]setseller(?:\s+([^\s]+))?/i, async (msg, match) => {
         await sendSafeMessage(chatId, `❌ Error: ${error.message}`);
     }
     clearUserState(requesterId);
+
+    await notifyAdminsAndGroups(`🔄 *CAMBIO DE ROL*\n👤 Usuario: ${user.username}\n🎭 Nuevo rol: ${newRole.toUpperCase()}\n👮‍♂️ Por: ${msg.from.username || msg.from.id}`);
 });
 
 bot.onText(/^[\/\.]setuser(?:\s+([^\s]+))?/i, async (msg, match) => {
@@ -1350,28 +1332,41 @@ bot.onText(/^[\/\.]setuser(?:\s+([^\s]+))?/i, async (msg, match) => {
     clearUserState(requesterId);
 });
 
-async function setUserStatus(chatId, requesterId, target, active) {
-    const role = await getUserRoleFromDB(requesterId);
-    if (role !== 'admin') return sendSafeMessage(chatId, '❌ Solo administradores pueden banear/desbanear.');
-    if (!target) throw new Error('Falta el usuario');
-    const user = await findUserByUsernameOrId(target, role);
-    await callApiWithBotKey(`/admin/users/${user.id}/status`, 'PUT', { is_active: active });
-    const estado = active ? 'activado' : 'baneado';
-    await sendSafeMessage(chatId, `✅ Usuario ${user.username} ha sido ${estado}.`);
-}
-
 bot.onText(/^[\/\.]ban(?:\s+([^\s]+))?/i, async (msg, match) => {
     const chatId = msg.chat.id;
     const requesterId = msg.from.id;
-    const args = match[1] ? match[1].trim().split(/\s+/) : [];
-    let target = args[0];
-    if (!target && msg.reply_to_message && msg.reply_to_message.text) target = msg.reply_to_message.text.trim();
+    let target = match[1];
+    if (!target && msg.reply_to_message && msg.reply_to_message.text) {
+        target = msg.reply_to_message.text.trim();
+    }
+    if (target && target.startsWith('@')) target = target.substring(1);
+
+    const role = await getUserRoleFromDB(requesterId);
+    if (role !== 'admin') {
+        return sendSafeMessage(chatId, '❌ Solo administradores pueden banear usuarios.');
+    }
     if (!target) {
         setUserState(requesterId, { step: 'awaiting_ban' });
-        return sendSafeMessage(chatId, '⛔ Envía @usuario|id para banearlo:');
+        return sendSafeMessage(chatId, '⛔ Envía @usuario o ID para banearlo:');
     }
     try {
-        await setUserStatus(chatId, requesterId, target, false);
+        const user = await findUserByUsernameOrId(target, role);
+        if (!user.is_active) {
+            return sendSafeMessage(chatId, `⚠️ ${user.username} ya está baneado.`);
+        }
+        await pool.query('UPDATE users SET is_active = false, updated_at = NOW() WHERE id = $1', [user.id]);
+        // Registrar en activity_logs (si existe la tabla)
+        await pool.query(
+            `INSERT INTO activity_logs (user_id, action_type, details, created_at)
+             VALUES ($1, 'ban', $2, NOW())`,
+            [requesterId, JSON.stringify({ target_user: user.username, target_id: user.id })]
+        );
+        const notifMsg = `⚠️ *USUARIO BANEADO* ⚠️\n\n` +
+                         `👮‍♂️ Administrador: ${msg.from.username || msg.from.id}\n` +
+                         `👤 Usuario baneado: ${user.username} (ID: ${user.id})\n` +
+                         `📅 Fecha: ${new Date().toLocaleString()}`;
+        await notifyAdminsAndGroups(notifMsg);
+        await sendSafeMessage(chatId, `✅ ${user.username} ha sido BANEADO. Se ha notificado a admins y grupos.`);
     } catch (error) {
         await sendSafeMessage(chatId, `❌ Error: ${error.message}`);
     }
@@ -1381,21 +1376,42 @@ bot.onText(/^[\/\.]ban(?:\s+([^\s]+))?/i, async (msg, match) => {
 bot.onText(/^[\/\.]unban(?:\s+([^\s]+))?/i, async (msg, match) => {
     const chatId = msg.chat.id;
     const requesterId = msg.from.id;
-    const args = match[1] ? match[1].trim().split(/\s+/) : [];
-    let target = args[0];
-    if (!target && msg.reply_to_message && msg.reply_to_message.text) target = msg.reply_to_message.text.trim();
+    let target = match[1];
+    if (!target && msg.reply_to_message && msg.reply_to_message.text) {
+        target = msg.reply_to_message.text.trim();
+    }
+    if (target && target.startsWith('@')) target = target.substring(1);
+
+    const role = await getUserRoleFromDB(requesterId);
+    if (role !== 'admin') {
+        return sendSafeMessage(chatId, '❌ Solo administradores pueden desbanear usuarios.');
+    }
     if (!target) {
         setUserState(requesterId, { step: 'awaiting_unban' });
-        return sendSafeMessage(chatId, '✅ Envía @usuario|id para desbanearlo:');
+        return sendSafeMessage(chatId, '✅ Envía @usuario o ID para desbanearlo:');
     }
     try {
-        await setUserStatus(chatId, requesterId, target, true);
+        const user = await findUserByUsernameOrId(target, role);
+        if (user.is_active) {
+            return sendSafeMessage(chatId, `⚠️ ${user.username} ya está activo.`);
+        }
+        await pool.query('UPDATE users SET is_active = true, updated_at = NOW() WHERE id = $1', [user.id]);
+        await pool.query(
+            `INSERT INTO activity_logs (user_id, action_type, details, created_at)
+             VALUES ($1, 'unban', $2, NOW())`,
+            [requesterId, JSON.stringify({ target_user: user.username, target_id: user.id })]
+        );
+        const notifMsg = `✅ *USUARIO DESBANEADO* ✅\n\n` +
+                         `👮‍♂️ Administrador: ${msg.from.username || msg.from.id}\n` +
+                         `👤 Usuario desbaneado: ${user.username} (ID: ${user.id})\n` +
+                         `📅 Fecha: ${new Date().toLocaleString()}`;
+        await notifyAdminsAndGroups(notifMsg);
+        await sendSafeMessage(chatId, `✅ ${user.username} ha sido DESBANEADO. Se ha notificado a admins y grupos.`);
     } catch (error) {
         await sendSafeMessage(chatId, `❌ Error: ${error.message}`);
     }
     clearUserState(requesterId);
 });
-
 bot.onText(/[\/\.]start/, async (msg) => {
     const chatId = msg.chat.id;
     const from = msg.from;
@@ -2153,28 +2169,16 @@ bot.onText(/^[\/\.]setcredits(?:\s+([^\s]+)\s+(\d+))?/i, async (msg, match) => {
     let target = match[1];
     let amount = match[2];
 
-    // Si no se usó el comando con argumentos, revisar reply
-    if (!target && msg.reply_to_message && msg.reply_to_message.text) {
-        const replyText = msg.reply_to_message.text.trim();
-        const parts = replyText.split(/\s+/);
-        if (parts.length >= 2) {
-            target = parts[0];
-            amount = parts[1];
-        } else {
-            target = parts[0];
-            amount = null;
-        }
+    if (!target && msg.reply_to_message?.text) {
+        const parts = msg.reply_to_message.text.trim().split(/\s+/);
+        if (parts.length >= 2) { target = parts[0]; amount = parts[1]; }
+        else { target = parts[0]; amount = null; }
     }
-
-    // Si el target es un ID numérico pequeño (probablemente no real), lo ignoramos
-    if (target && /^\d+$/.test(target) && parseInt(target) < 10000) {
-        target = null;
-    }
+    if (target?.startsWith('@')) target = target.substring(1);
+    if (target && /^\d+$/.test(target) && parseInt(target) < 10000) target = null;
 
     const role = await getUserRoleFromDB(requesterId);
-    if (role !== 'admin') {
-        return sendSafeMessage(chatId, '❌ Solo administradores pueden usar este comando.');
-    }
+    if (role !== 'admin') return sendSafeMessage(chatId, '❌ Solo administradores pueden usar este comando.');
 
     if (!target || !amount) {
         setUserState(requesterId, { step: 'awaiting_setcredits' });
@@ -2183,8 +2187,16 @@ bot.onText(/^[\/\.]setcredits(?:\s+([^\s]+)\s+(\d+))?/i, async (msg, match) => {
 
     try {
         const user = await findUserByUsernameOrId(target, role);
-        await callApiWithBotKey(`/admin/users/${user.id}/credits`, 'PUT', { credits: parseInt(amount), reason: 'Ajuste por bot' });
-        await sendSafeMessage(chatId, `✅ Se establecieron ${amount} créditos para ${user.username}.`);
+        const newCredits = parseInt(amount);
+        if (isNaN(newCredits) || newCredits < 0) throw new Error('Cantidad inválida');
+        const oldCredits = user.credits;
+        await pool.query('UPDATE users SET credits = $1, updated_at = NOW() WHERE id = $2', [newCredits, user.id]);
+        await pool.query(
+            `INSERT INTO credit_transactions (from_user_id, to_user_id, transaction_type, amount, previous_amount, new_amount, reason, created_at)
+             VALUES ($1, $2, 'credits', $3, $4, $5, $6, NOW())`,
+            [requesterId, user.id, newCredits - oldCredits, oldCredits, newCredits, 'Ajuste por bot']
+        );
+        await sendSafeMessage(chatId, `✅ Se establecieron ${newCredits} créditos para ${user.username}.`);
     } catch (error) {
         await sendSafeMessage(chatId, `❌ Error: ${error.message}`);
     }
@@ -2198,23 +2210,24 @@ const planConfig = {
     '200': { credits: 200, days: 30 }
 };
 
+const planConfig = {
+    '20': { credits: 20, days: 3 },
+    '60': { credits: 60, days: 7 },
+    '120': { credits: 120, days: 15 },
+    '200': { credits: 200, days: 30 }
+};
+
 bot.onText(/^[\/\.]setplan(20|60|120|200)(?:\s+([^\s]+))?/i, async (msg, match) => {
     const chatId = msg.chat.id;
     const requesterId = msg.from.id;
-    const plan = match[1];      // '20', '60', '120' o '200'
-    let target = match[2];      // puede ser undefined
+    const plan = match[1];
+    let target = match[2];
 
-    if (!target && msg.reply_to_message && msg.reply_to_message.text) {
-        target = msg.reply_to_message.text.trim();
-    }
-
-    // Limpiar @ si viene
-    if (target && target.startsWith('@')) target = target.substring(1);
+    if (!target && msg.reply_to_message?.text) target = msg.reply_to_message.text.trim();
+    if (target?.startsWith('@')) target = target.substring(1);
 
     const role = await getUserRoleFromDB(requesterId);
-    if (role !== 'admin' && role !== 'seller') {
-        return sendSafeMessage(chatId, '❌ No tienes permiso para usar este comando.');
-    }
+    if (role !== 'admin' && role !== 'seller') return sendSafeMessage(chatId, '❌ No tienes permiso.');
 
     if (!target) {
         setUserState(requesterId, { step: `awaiting_setplan_${plan}` });
@@ -2224,41 +2237,41 @@ bot.onText(/^[\/\.]setplan(20|60|120|200)(?:\s+([^\s]+))?/i, async (msg, match) 
     try {
         const user = await findUserByUsernameOrId(target, role);
         const { credits, days } = planConfig[plan];
-        await callApiWithBotKey(`/admin/users/${user.id}/credits`, 'PUT', { credits, reason: `Plan ${plan}` });
-        await callApiWithBotKey(`/admin/users/${user.id}/days`, 'PUT', { days, reason: `Plan ${plan}` });
+        const oldCredits = user.credits;
+        const oldDays = user.days_remaining;
+        await pool.query('UPDATE users SET credits = $1, days_remaining = $2, updated_at = NOW() WHERE id = $3', [credits, days, user.id]);
+        await pool.query(
+            `INSERT INTO credit_transactions (from_user_id, to_user_id, transaction_type, amount, previous_amount, new_amount, reason, created_at)
+             VALUES ($1, $2, 'credits', $3, $4, $5, $6, NOW())`,
+            [requesterId, user.id, credits - oldCredits, oldCredits, credits, `Plan ${plan}`]
+        );
+        await pool.query(
+            `INSERT INTO credit_transactions (from_user_id, to_user_id, transaction_type, amount, previous_amount, new_amount, reason, created_at)
+             VALUES ($1, $2, 'days', $3, $4, $5, $6, NOW())`,
+            [requesterId, user.id, days - oldDays, oldDays, days, `Plan ${plan}`]
+        );
         await sendSafeMessage(chatId, `✅ Plan ${plan} asignado a ${user.username}: ${credits} créditos y ${days} días.`);
     } catch (error) {
         await sendSafeMessage(chatId, `❌ Error: ${error.message}`);
     }
     clearUserState(requesterId);
 });
-
 bot.onText(/^[\/\.]setdays(?:\s+([^\s]+)\s+(\d+))?/i, async (msg, match) => {
     const chatId = msg.chat.id;
     const requesterId = msg.from.id;
     let target = match[1];
     let days = match[2];
 
-    if (!target && msg.reply_to_message && msg.reply_to_message.text) {
-        const replyText = msg.reply_to_message.text.trim();
-        const parts = replyText.split(/\s+/);
-        if (parts.length >= 2) {
-            target = parts[0];
-            days = parts[1];
-        } else {
-            target = parts[0];
-            days = null;
-        }
+    if (!target && msg.reply_to_message?.text) {
+        const parts = msg.reply_to_message.text.trim().split(/\s+/);
+        if (parts.length >= 2) { target = parts[0]; days = parts[1]; }
+        else { target = parts[0]; days = null; }
     }
-
-    if (target && /^\d+$/.test(target) && parseInt(target) < 10000) {
-        target = null;
-    }
+    if (target?.startsWith('@')) target = target.substring(1);
+    if (target && /^\d+$/.test(target) && parseInt(target) < 10000) target = null;
 
     const role = await getUserRoleFromDB(requesterId);
-    if (role !== 'admin') {
-        return sendSafeMessage(chatId, '❌ Solo administradores pueden usar este comando.');
-    }
+    if (role !== 'admin') return sendSafeMessage(chatId, '❌ Solo administradores pueden usar este comando.');
 
     if (!target || !days) {
         setUserState(requesterId, { step: 'awaiting_setdays' });
@@ -2267,8 +2280,16 @@ bot.onText(/^[\/\.]setdays(?:\s+([^\s]+)\s+(\d+))?/i, async (msg, match) => {
 
     try {
         const user = await findUserByUsernameOrId(target, role);
-        await callApiWithBotKey(`/admin/users/${user.id}/days`, 'PUT', { days: parseInt(days), reason: 'Ajuste por bot' });
-        await sendSafeMessage(chatId, `✅ Se establecieron ${days} días para ${user.username}.`);
+        const newDays = parseInt(days);
+        if (isNaN(newDays) || newDays < 0) throw new Error('Cantidad inválida');
+        const oldDays = user.days_remaining;
+        await pool.query('UPDATE users SET days_remaining = $1, updated_at = NOW() WHERE id = $2', [newDays, user.id]);
+        await pool.query(
+            `INSERT INTO credit_transactions (from_user_id, to_user_id, transaction_type, amount, previous_amount, new_amount, reason, created_at)
+             VALUES ($1, $2, 'days', $3, $4, $5, $6, NOW())`,
+            [requesterId, user.id, newDays - oldDays, oldDays, newDays, 'Ajuste por bot']
+        );
+        await sendSafeMessage(chatId, `✅ Se establecieron ${newDays} días para ${user.username}.`);
     } catch (error) {
         await sendSafeMessage(chatId, `❌ Error: ${error.message}`);
     }
