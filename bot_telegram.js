@@ -359,6 +359,59 @@ async function verificarTarjetasConCookie(chatId, cookie, tarjetas, mensajePrevi
     await sendSafeMessage(chatId, resumen, { parse_mode: 'Markdown' });
 }
 
+// ========== VERIFICACIÓN AUTOMÁTICA DE PERFIL ==========
+async function checkAndUpdateTelegramProfile(telegramId, userId, currentUsername, currentFullName) {
+    const res = await pool.query(
+        'SELECT telegram_username, display_name FROM users WHERE id = $1',
+        [userId]
+    );
+    if (res.rows.length === 0) return null;
+    const saved = res.rows[0];
+    const changes = {};
+    if (saved.telegram_username !== currentUsername) {
+        changes.username = { old: saved.telegram_username, new: currentUsername };
+    }
+    if (saved.display_name !== currentFullName) {
+        changes.display_name = { old: saved.display_name, new: currentFullName };
+    }
+    if (Object.keys(changes).length > 0) {
+        await pool.query(
+            `UPDATE users SET telegram_username = $1, display_name = $2, updated_at = NOW() WHERE id = $3`,
+            [currentUsername, currentFullName, userId]
+        );
+        // Si no tienes la tabla profile_change_logs, comenta la siguiente línea
+        await pool.query(
+            `INSERT INTO profile_change_logs (user_id, old_username, new_username, old_display_name, new_display_name, detected_at)
+             VALUES ($1, $2, $3, $4, $5, NOW())`,
+            [userId, saved.telegram_username, currentUsername, saved.display_name, currentFullName]
+        ).catch(err => console.error('Error insertando log:', err.message));
+        await notifyAdminsAboutProfileChange(userId, saved, { telegram_username: currentUsername, display_name: currentFullName });
+        return changes;
+    }
+    return null;
+}
+
+async function notifyAdminsAboutProfileChange(userId, oldData, newData) {
+    const userRes = await pool.query('SELECT username, telegram_id FROM users WHERE id = $1', [userId]);
+    if (userRes.rows.length === 0) return;
+    const user = userRes.rows[0];
+    const message = `⚠️ *CAMBIO DE PERFIL DETECTADO* ⚠️\n\n` +
+                    `👤 Usuario: ${user.username}\n` +
+                    `🆔 ID: ${userId}\n` +
+                    `📱 Telegram ID: ${user.telegram_id}\n\n` +
+                    `📛 Nombre: \`${oldData.display_name}\` → \`${newData.display_name}\`\n` +
+                    `👥 Username: @${oldData.telegram_username || ''} → @${newData.telegram_username || ''}\n\n` +
+                    `🕒 Detectado automáticamente.`;
+    const adminsRes = await pool.query('SELECT telegram_id FROM users WHERE role = $1 AND telegram_id IS NOT NULL', ['admin']);
+    for (const admin of adminsRes.rows) {
+        if (admin.telegram_id) {
+            try {
+                await bot.sendMessage(admin.telegram_id, message, { parse_mode: 'Markdown' });
+            } catch (err) { console.error('Error notificando admin:', err.message); }
+        }
+    }
+}
+
 // Procesa un extra generando 'cantidad' tarjetas y verificándolas con rotación asíncrona de cookies
 async function procesarExtraInfinita(chatId, telegramId, extra, cantidadTarjetas, extraIndex) {
     // Generar todas las tarjetas de una vez
@@ -502,7 +555,7 @@ async function getUserByTelegramId(telegramId) {
     return res.rows[0];
 }
 
-async function upsertUser(telegramId, username, firstName, chatId, chatType) {
+async function upsertUser(telegramId, username, fullName, chatId, chatType) {
     if (chatType !== 'private') return;
     const now = new Date();
     const client = await pool.connect();
@@ -513,19 +566,19 @@ async function upsertUser(telegramId, username, firstName, chatId, chatType) {
         if (existing.rows.length > 0) {
             await client.query(
                 `UPDATE users SET telegram_chat_id = $1, telegram_username = $2, display_name = $3, updated_at = $4 WHERE telegram_id = $5`,
-                [chatId, username, firstName, now, telegramId]
+                [chatId, username, fullName, now, telegramId]
             );
         } else {
             const byUsername = await client.query('SELECT id FROM users WHERE username = $1', [username]);
             if (byUsername.rows.length > 0) {
                 await client.query(
                     `UPDATE users SET telegram_id = $1, telegram_chat_id = $2, telegram_username = $3, display_name = $4, updated_at = $5 WHERE username = $6`,
-                    [telegramId, chatId, username, firstName, now, username]
+                    [telegramId, chatId, username, fullName, now, username]
                 );
             } else {
                 await client.query(
                     `INSERT INTO users (telegram_id, telegram_username, telegram_chat_id, username, display_name, created_at) VALUES ($1, $2, $3, $4, $5, $6)`,
-                    [telegramId, username, chatId, username, firstName, now]
+                    [telegramId, username, chatId, username, fullName, now]
                 );
             }
         }
@@ -1347,20 +1400,20 @@ bot.onText(/[\/\.]start/, async (msg) => {
     const from = msg.from;
     const telegramId = from.id;
     const username = from.username || telegramId.toString();
-    const firstName = from.first_name || '';
+    const fullName  = (from.first_name || '') + (from.last_name ? ' ' + from.last_name : '');
     const chatType = msg.chat.type;
 
     try {
         const existing = await getUserByTelegramId(telegramId);
         const isNew = !existing;
-        await upsertUser(telegramId, username, firstName, chatId, chatType);
+        await upsertUser(telegramId, username, fullName, chatId, chatType);
         if (isNew) {
             await sendSafeMessage(chatId,
-                `👋 ¡Hola ${firstName}! 👋\n\nHe guardado tu Chat ID: <code>${telegramId}</code>\n\nRegístrate en la web: https://astralchk.com/login.html con usuario @${username}`, { parse_mode: 'HTML' });
+                `👋 ¡Hola ${fullName}! 👋\n\nHe guardado tu Chat ID: <code>${telegramId}</code>\n\nRegístrate en la web: https://astralchk.com/login.html con usuario @${username}`, { parse_mode: 'HTML' });
         } else {
 
             await sendSafeMessage(chatId,
-                `👋 ¡Hola ${firstName}!\n💰 Créditos: ${existing.credits}\n📅 Días: ${existing.days_remaining}\n\nUsa /menu para ver comandos.`, { parse_mode: 'Markdown' });
+                `👋 ¡Hola ${fullName}!\n💰 Créditos: ${existing.credits}\n📅 Días: ${existing.days_remaining}\n\nUsa /menu para ver comandos.`, { parse_mode: 'Markdown' });
         }
     } catch (error) {
         console.error(error);
@@ -1885,8 +1938,8 @@ bot.on('message', async (msg) => {
     if (userRes.rows.length > 0) {
         const userId = userRes.rows[0].id;
         const currentUsername = msg.from.username || null;
-        const currentFirstName = msg.from.first_name || '';
-        await checkAndUpdateTelegramProfile(telegramId, userId, currentUsername, currentFirstName);
+        const currentFullName = (msg.from.first_name || '') + (msg.from.last_name ? ' ' + msg.from.last_name : '');
+        await checkAndUpdateTelegramProfile(telegramId, userId, currentUsername, currentFullName);
     }
 
     const state = userStates.get(msg.from.id);
