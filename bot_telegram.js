@@ -521,31 +521,40 @@ async function callApiWithBotKey(endpoint, method, body = null) {
 }
 
 async function findUserByUsernameOrId(identifier, requesterRole) {
-    // 1. Buscar por username (búsqueda parcial, luego filtramos exacto)
+    // Limpiar @ si viene
     if (identifier.startsWith('@')) identifier = identifier.substring(1);
-
-    let data;
-    try {
-        data = await callApiWithBotKey(`/admin/users?search=${encodeURIComponent(identifier)}`, 'GET');
-    } catch (err) {
-        data = { users: [] };
-    }
-    // Buscar coincidencia exacta (case-insensitive)
-    const exactMatch = data.users?.find(u => u.username.toLowerCase() === identifier.toLowerCase());
-    if (exactMatch) return exactMatch;
-
-    // 2. Si es numérico, intentar por ID
+    
+    // Si es un ID numérico (entero), buscar por ID
     if (/^\d+$/.test(identifier)) {
-        try {
-            const userById = await callApiWithBotKey(`/admin/users/${identifier}`, 'GET');
-            if (userById.user) return userById.user;
-        } catch (err) {
-            // Ignorar, el ID no existe
-        }
+        const userId = parseInt(identifier);
+        const res = await pool.query(
+            `SELECT id, username, display_name, credits, days_remaining, role, is_active, created_at, telegram_username, telegram_id
+             FROM users WHERE id = $1`,
+            [userId]
+        );
+        if (res.rows.length > 0) return res.rows[0];
     }
-
-    // 3. Si nada funciona, error
-    throw new Error(`Usuario "${identifier}" no encontrado`);
+    
+    // Buscar por username (columna username) o telegram_username (case-insensitive)
+    const res = await pool.query(
+        `SELECT id, username, display_name, credits, days_remaining, role, is_active, created_at, telegram_username, telegram_id
+         FROM users 
+         WHERE LOWER(username) = LOWER($1) OR LOWER(telegram_username) = LOWER($1)`,
+        [identifier]
+    );
+    
+    if (res.rows.length === 0) {
+        throw new Error(`Usuario "${identifier}" no encontrado`);
+    }
+    
+    const user = res.rows[0];
+    
+    // Si el que consulta es seller, solo puede ver usuarios con rol 'user'
+    if (requesterRole === 'seller' && user.role !== 'user') {
+        throw new Error('No tienes permiso para ver este usuario');
+    }
+    
+    return user;
 }
 
 bot.onText(/^[\/\.]setadmin(?:\s+([^\s]+))?/i, async (msg, match) => {
