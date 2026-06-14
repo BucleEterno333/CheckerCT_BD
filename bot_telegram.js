@@ -762,8 +762,12 @@ async function handleGenCookieCommand(chatId, telegramId, country) {
     try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 1200000);
+
+        const globalForcePlaywright = await getGlobalForcePlaywright();
+        const requestBody = { country, add_address: true };
+        if (globalForcePlaywright) requestBody.force_playwright = true;
         const response = await fetch(`${API_GENCOOKIE_URL}/generate`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ country, add_address: true }), signal: controller.signal
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(requestBody), signal: controller.signal
         });
         clearTimeout(timeoutId);
         const data = await response.json();
@@ -788,7 +792,10 @@ async function procesarExtraConCantidad(chatId, telegramId, extra, cantidad) {
     if (total === 0) throw new Error('No se generaron tarjetas');
 
     const generarCookieAsync = async () => {
-        const response = await fetch(`${API_GENCOOKIE_URL}/generate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ country: 'MX', add_address: true }) });
+        const globalForcePlaywright = await getGlobalForcePlaywright();
+        const requestBody = { country: 'MX', add_address: true };
+        if (globalForcePlaywright) requestBody.force_playwright = true;
+        const response = await fetch(`${API_GENCOOKIE_URL}/generate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(requestBody) });
         const data = await response.json();
         if (!data.success) throw new Error('Error generando cookie');
         const creditResult = await deductCredits(telegramId, 4);
@@ -1210,10 +1217,13 @@ bot.onText(/^[\/\.](?:amazoncookieinfinita|amzckin|amazoninfinita)(?:\s+(.+))?/i
 
     // Función para generar cookie
     const generarCookie = async () => {
+        const globalForcePlaywright = await getGlobalForcePlaywright();
+        const requestBody = { country, add_address: true };
+        if (globalForcePlaywright) requestBody.force_playwright = true;
         const response = await fetch(`${API_GENCOOKIE_URL}/generate`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ country: 'MX', add_address: true })
+            body: JSON.stringify(requestBody)
         });
         const data = await response.json();
         if (!data.success) throw new Error('Error generando cookie');
@@ -1401,7 +1411,10 @@ bot.onText(/^[\/\.](?:amazoncookie|amazoncuki|amazonck|amzck)/i, async (msg) => 
     if (!param) {
         await sendSafeMessage(chatId, '🍪 Generando nueva cookie...');
         try {
-            const response = await fetch(`${API_GENCOOKIE_URL}/generate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ country: 'MX', add_address: true }) });
+            const globalForcePlaywright = await getGlobalForcePlaywright();
+            const requestBody = { country: 'MX', add_address: true };
+            if (globalForcePlaywright) requestBody.force_playwright = true;
+            const response = await fetch(`${API_GENCOOKIE_URL}/generate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(requestBody) });
             const data = await response.json();
             if (!data.success) throw new Error('Error al generar cookie');
             const cookie = data.data.cookie_string;
@@ -1421,7 +1434,10 @@ bot.onText(/^[\/\.](?:amazoncookie|amazoncuki|amazonck|amzck)/i, async (msg) => 
         await sendSafeMessage(chatId, `💳 *Tarjetas a verificar (${tarjetas.length}):*\n${tarjetas.map(t => `\`${t}\``).join('\n')}`, { parse_mode: 'Markdown' });
         await sendSafeMessage(chatId, '🍪 Generando cookie para verificación...');
         try {
-            const response = await fetch(`${API_GENCOOKIE_URL}/generate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ country: 'MX', add_address: true }) });
+            const globalForcePlaywright = await getGlobalForcePlaywright();
+            const requestBody = { country: 'MX', add_address: true };
+            if (globalForcePlaywright) requestBody.force_playwright = true;
+            const response = await fetch(`${API_GENCOOKIE_URL}/generate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(requestBody) });
             const data = await response.json();
             if (!data.success) throw new Error('Error al generar cookie');
             const cookie = data.data.cookie_string;
@@ -1439,7 +1455,10 @@ bot.onText(/^[\/\.](?:amazoncookie|amazoncuki|amazonck|amzck)/i, async (msg) => 
             [cookie, extrapolation] = await Promise.all([
                 (async () => {
                     try {
-                        const response = await fetch(`${API_GENCOOKIE_URL}/generate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ country: 'MX', add_address: true }) });
+                        const globalForcePlaywright = await getGlobalForcePlaywright();
+                        const requestBody = { country: 'MX', add_address: true };
+                        if (globalForcePlaywright) requestBody.force_playwright = true;
+                        const response = await fetch(`${API_GENCOOKIE_URL}/generate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(requestBody) });
                         const data = await response.json();
                         if (!data.success) throw new Error('Error al generar cookie');
                         await updateUserCookie(telegramId, data.data.cookie_string);
@@ -1469,7 +1488,10 @@ bot.onText(/^[\/\.](?:amazoncookie|amazoncuki|amazonck|amzck)/i, async (msg) => 
             let tarjetasGen = generarTarjetasDesdePatron(normalized, 14);
             await sendSafeMessage(chatId, `🎴 *Tarjetas generadas (${tarjetasGen.length}):*\n${tarjetasGen.slice(0,14).map(t => `\`${t}\``).join('\n')}`, { parse_mode: 'Markdown' });
             await sendSafeMessage(chatId, '🍪 Generando cookie para verificación...');
-            const response = await fetch(`${API_GENCOOKIE_URL}/generate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ country: 'MX', add_address: true }) });
+            const globalForcePlaywright = await getGlobalForcePlaywright();
+            const requestBody = { country: 'MX', add_address: true };
+            if (globalForcePlaywright) requestBody.force_playwright = true;
+            const response = await fetch(`${API_GENCOOKIE_URL}/generate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(requestBody) });
             const data = await response.json();
             if (!data.success) throw new Error('Error al generar cookie');
             const cookie = data.data.cookie_string;
@@ -1684,7 +1706,10 @@ bot.on('callback_query', async (callbackQuery) => {
     const data = callbackQuery.data;
     if (data === 'gencookie_for_amazon') {
         try {
-            const response = await fetch(`${API_GENCOOKIE_URL}/generate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ country: 'MX', add_address: true }) });
+            const globalForcePlaywright = await getGlobalForcePlaywright();
+            const requestBody = { country, add_address: true };
+            if (globalForcePlaywright) requestBody.force_playwright = true;
+            const response = await fetch(`${API_GENCOOKIE_URL}/generate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(requestBody) });
             const json = await response.json();
             if (!json.success) throw new Error('Error');
             const cookie = json.data.cookie_string;
