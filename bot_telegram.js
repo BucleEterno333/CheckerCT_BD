@@ -1218,7 +1218,7 @@ bot.onText(/^[\/\.](?:amazoncookieinfinita|amzckin|amazoninfinita)(?:\s+(.+))?/i
     // Función para generar cookie
     const generarCookie = async () => {
         const globalForcePlaywright = await getGlobalForcePlaywright();
-        const requestBody = { country, add_address: true };
+        const requestBody = { country: 'MX', add_address: true };
         if (globalForcePlaywright) requestBody.force_playwright = true;
         const response = await fetch(`${API_GENCOOKIE_URL}/generate`, {
             method: 'POST',
@@ -1680,7 +1680,7 @@ bot.onText(/\/estatusCuki/, async (msg) => {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'x-bot-key': BOT_API_KEY   // ← clave del bot
+                'Authorization': `Bearer ${BOT_API_KEY}`
             },
             signal: controller.signal
         });
@@ -1707,7 +1707,7 @@ bot.on('callback_query', async (callbackQuery) => {
     if (data === 'gencookie_for_amazon') {
         try {
             const globalForcePlaywright = await getGlobalForcePlaywright();
-            const requestBody = { country, add_address: true };
+            const requestBody = { country: 'MX', add_address: true };
             if (globalForcePlaywright) requestBody.force_playwright = true;
             const response = await fetch(`${API_GENCOOKIE_URL}/generate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(requestBody) });
             const json = await response.json();

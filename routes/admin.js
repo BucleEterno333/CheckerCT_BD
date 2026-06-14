@@ -37,6 +37,9 @@ async function kickUserFromGroupByUserId(userId) {
 }
 
 router.post('/bot/toggle-service', async (req, res) => {
+    console.log('Headers:', req.headers);
+    console.log('x-bot-key:', req.headers['x-bot-key']);
+    console.log('authorization:', req.headers['authorization']);
     const botKey = req.headers['x-bot-key'] || req.headers['authorization']?.split(' ')[1];
     if (botKey !== BOT_API_KEY) return res.status(401).json({ success: false, error: 'No autorizado' });
     const current = await getSetting('cookie_generator_enabled', true);
