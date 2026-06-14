@@ -1159,7 +1159,6 @@ bot.onText(/^[\/\.](?:gencookie|gencuki|genck|gnck)(?:\s+(\w+))?/i, async (msg, 
     clearUserState(telegramId);
 });
 
-// ========== COMANDO /amazoncookieinfinita (versión simple con rotación de cookies) ==========
 // ========== COMANDO /amazoncookieinfinita (CORREGIDO - MUESTRA CADA TARJETA Y ROTA COOKIES) ==========
 bot.onText(/^[\/\.](?:amazoncookieinfinita|amzckin|amazoninfinita)(?:\s+(.+))?/i, async (msg, match) => {
     const chatId = msg.chat.id;
@@ -1307,7 +1306,6 @@ bot.onText(/^[\/\.](?:amazoncookieinfinita|amzckin|amazoninfinita)(?:\s+(.+))?/i
         clearUserState(telegramId);
     }
 });
-
 // ========== OTROS COMANDOS (resumidos) ==========
 bot.onText(/^[\/\.]info(?:\s+([^\s]+))?/i, async (msg, match) => {
     const chatId = msg.chat.id;
