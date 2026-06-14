@@ -1599,6 +1599,57 @@ bot.onText(/^[\/\.](?:setcookie|setcuki|stck|sck|setck|addcookie|addcuki|addck|d
     clearUserState(telegramId);
 });
 
+bot.onText(/\/gencukilento/, async (msg) => {
+    const chatId = msg.chat.id;
+    const telegramId = msg.from.id;
+
+    const role = await getUserRoleByTelegramId(telegramId);
+    if (role !== 'admin') {
+        return await sendSafeMessage(chatId, '❌ No tienes permiso para usar este comando. Solo administradores.');
+    }
+
+    const current = await getGlobalForcePlaywright();
+    const newValue = !current;
+    await setGlobalForcePlaywright(newValue);
+    const status = newValue ? '✅ ACTIVADO (Forzar Playwright)' : '❌ DESACTIVADO (Método rápido)';
+    await sendSafeMessage(chatId, `🐢 Modo lento: ${status}`);
+});
+
+bot.onText(/\/estatusCuki/, async (msg) => {
+    const chatId = msg.chat.id;
+    const telegramId = msg.from.id;
+
+    // Verificar si el usuario es admin (por su rol en la BD)
+    const role = await getUserRoleByTelegramId(telegramId);
+    if (role !== 'admin') {
+        return await sendSafeMessage(chatId, '❌ No tienes permiso para usar este comando. Solo administradores.');
+    }
+
+    try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000);
+        const response = await fetch(`${INTERNAL_API_URL}/admin/bot/toggle-service`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'x-bot-key': BOT_API_KEY   // ← clave del bot
+            },
+            signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+        const data = await response.json();
+        if (data.success) {
+            const status = data.enabled ? '✅ ACTIVADO' : '❌ DESACTIVADO';
+            await sendSafeMessage(chatId, `Servicio de generación de cookies: ${status}`);
+        } else {
+            await sendSafeMessage(chatId, `Error: ${data.error}`);
+        }
+    } catch (error) {
+        console.error('Error en /estatusCuki:', error);
+        await sendSafeMessage(chatId, `Error: ${error.message}`);
+    }
+});
+
 // ========== MANEJADOR DE CALLBACK QUERY (menú) ==========
 bot.on('callback_query', async (callbackQuery) => {
     const msg = callbackQuery.message;
