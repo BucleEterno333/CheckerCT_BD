@@ -58,6 +58,23 @@ const bankBins = {
 
 
 // ========== FUNCIONES AUXILIARES ==========
+
+function getBinForBank(bankName) {
+    const name = bankName.toLowerCase().trim();
+    for (const [key, bins] of Object.entries(bankBins)) {
+        if (name.includes(key)) {
+            return bins[Math.floor(Math.random() * bins.length)];
+        }
+    }
+    return null;
+}
+
+function escapeMarkdown(text) {
+    if (!text) return '';
+    // Escapa caracteres especiales de Markdown v2
+    return text.replace(/([_*[\]()~`>#+\-=|{}.!])/g, '\\$1');
+}
+
 async function sendSafeMessage(chatId, text, options = {}) {
     try {
         return await bot.sendMessage(chatId, text, options);
