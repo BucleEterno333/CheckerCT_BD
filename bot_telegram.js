@@ -522,6 +522,8 @@ async function callApiWithBotKey(endpoint, method, body = null) {
 
 async function findUserByUsernameOrId(identifier, requesterRole) {
     // 1. Buscar por username (búsqueda parcial, luego filtramos exacto)
+    if (identifier.startsWith('@')) identifier = identifier.substring(1);
+
     let data;
     try {
         data = await callApiWithBotKey(`/admin/users?search=${encodeURIComponent(identifier)}`, 'GET');
@@ -545,6 +547,114 @@ async function findUserByUsernameOrId(identifier, requesterRole) {
     // 3. Si nada funciona, error
     throw new Error(`Usuario "${identifier}" no encontrado`);
 }
+
+bot.onText(/^[\/\.]setadmin(?:\s+([^\s]+))?/i, async (msg, match) => {
+    const chatId = msg.chat.id;
+    const requesterId = msg.from.id;
+    let target = match[1];
+
+    if (!target && msg.reply_to_message && msg.reply_to_message.text) {
+        target = msg.reply_to_message.text.trim();
+    }
+
+    // Limpiar @ si viene
+    if (target && target.startsWith('@')) target = target.substring(1);
+
+    const role = await getUserRoleFromDB(requesterId);
+    if (role !== 'admin') {
+        return sendSafeMessage(chatId, '❌ Solo administradores pueden cambiar roles a ADMIN.');
+    }
+
+    if (!target) {
+        setUserState(requesterId, { step: 'awaiting_setadmin' });
+        return sendSafeMessage(chatId, '👑 Envía @usuario o ID para hacerlo administrador:');
+    }
+
+    try {
+        const user = await findUserByUsernameOrId(target, role);
+        if (user.role === 'admin') {
+            return sendSafeMessage(chatId, `⚠️ ${user.username} ya es administrador.`);
+        }
+        await callApiWithBotKey(`/admin/users/${user.id}/role`, 'PUT', { new_role: 'admin' });
+        await sendSafeMessage(chatId, `✅ ${user.username} ahora es ADMINISTRADOR.`);
+    } catch (error) {
+        await sendSafeMessage(chatId, `❌ Error: ${error.message}`);
+    }
+    clearUserState(requesterId);
+});
+
+bot.onText(/^[\/\.]setseller(?:\s+([^\s]+))?/i, async (msg, match) => {
+    const chatId = msg.chat.id;
+    const requesterId = msg.from.id;
+    let target = match[1];
+
+    if (!target && msg.reply_to_message && msg.reply_to_message.text) {
+        target = msg.reply_to_message.text.trim();
+    }
+
+    if (target && target.startsWith('@')) target = target.substring(1);
+
+    const role = await getUserRoleFromDB(requesterId);
+    if (role !== 'admin') {
+        return sendSafeMessage(chatId, '❌ Solo administradores pueden cambiar roles a SELLER.');
+    }
+
+    if (!target) {
+        setUserState(requesterId, { step: 'awaiting_setseller' });
+        return sendSafeMessage(chatId, '🛒 Envía @usuario o ID para hacerlo vendedor:');
+    }
+
+    try {
+        const user = await findUserByUsernameOrId(target, role);
+        if (user.role === 'admin') {
+            return sendSafeMessage(chatId, `⚠️ No puedes degradar a un administrador a seller. Usa /setuser para dejarlo como usuario normal.`);
+        }
+        if (user.role === 'seller') {
+            return sendSafeMessage(chatId, `⚠️ ${user.username} ya es vendedor.`);
+        }
+        await callApiWithBotKey(`/admin/users/${user.id}/role`, 'PUT', { new_role: 'seller' });
+        await sendSafeMessage(chatId, `✅ ${user.username} ahora es SELLER.`);
+    } catch (error) {
+        await sendSafeMessage(chatId, `❌ Error: ${error.message}`);
+    }
+    clearUserState(requesterId);
+});
+
+
+
+bot.onText(/^[\/\.]setuser(?:\s+([^\s]+))?/i, async (msg, match) => {
+    const chatId = msg.chat.id;
+    const requesterId = msg.from.id;
+    let target = match[1];
+
+    if (!target && msg.reply_to_message && msg.reply_to_message.text) {
+        target = msg.reply_to_message.text.trim();
+    }
+
+    if (target && target.startsWith('@')) target = target.substring(1);
+
+    const role = await getUserRoleFromDB(requesterId);
+    if (role !== 'admin') {
+        return sendSafeMessage(chatId, '❌ Solo administradores pueden degradar roles.');
+    }
+
+    if (!target) {
+        setUserState(requesterId, { step: 'awaiting_setuser' });
+        return sendSafeMessage(chatId, '👤 Envía @usuario o ID para dejarlo como usuario normal:');
+    }
+
+    try {
+        const user = await findUserByUsernameOrId(target, role);
+        if (user.role === 'user') {
+            return sendSafeMessage(chatId, `⚠️ ${user.username} ya es usuario normal.`);
+        }
+        await callApiWithBotKey(`/admin/users/${user.id}/role`, 'PUT', { new_role: 'user' });
+        await sendSafeMessage(chatId, `✅ ${user.username} ahora es USUARIO NORMAL.`);
+    } catch (error) {
+        await sendSafeMessage(chatId, `❌ Error: ${error.message}`);
+    }
+    clearUserState(requesterId);
+});
 
 // ========== FUNCIONES DE BASE DE DATOS ==========
 async function getUserByTelegramId(telegramId) {
@@ -1167,124 +1277,6 @@ bot.onText(/^[\/\.]info(?:\s+([^\s]+))?/i, async (msg, match) => {
     clearUserState(requesterId);
 });
 
-bot.onText(/^[\/\.]setcredits(?:\s+([^\s]+)\s+(\d+))?/i, async (msg, match) => {
-    const args = match[1] ? match[1].trim().split(/\s+/) : [];
-    const chatId = msg.chat.id;
-    const requesterId = msg.from.id;
-    let target = args[0];
-    let amount = args[1];
-    if (!target && msg.reply_to_message && msg.reply_to_message.text) {
-        const replyText = msg.reply_to_message.text.trim();
-        const parts = replyText.split(/\s+/);
-        // Si el reply tiene dos partes, asumimos usuario y cantidad
-        if (parts.length >= 2) {
-            target = parts[0];
-            amount = parts[1];
-        } else {
-            // Si solo tiene una parte, es el usuario y faltan los días
-            target = parts[0];
-            amount = null; // forzamos a null para que entre en modo interactivo
-        }
-    }
-
-    if (target && /^\d+$/.test(target) && parseInt(target) < 10000) {
-        // Probablemente no es un ID real, pedir de nuevo
-        target = null;
-    }
-    const role = await getUserRoleFromDB(requesterId);
-    if (role !== 'admin') return sendSafeMessage(chatId, '❌ Solo administradores pueden usar este comando.');
-    if (!target || !amount) {
-        setUserState(requesterId, { step: 'awaiting_setcredits' });
-        return sendSafeMessage(chatId, '💳 Envía @usuario|id y la cantidad de créditos (ej. @usuario 100):');
-    }
-    try {
-        const user = await findUserByUsernameOrId(target, role);
-        await callApiWithBotKey(`/admin/users/${user.id}/credits`, 'PUT', { credits: parseInt(amount), reason: 'Ajuste por bot' });
-        await sendSafeMessage(chatId, `✅ Se establecieron ${amount} créditos para ${user.username}.`);
-    } catch (error) {
-        await sendSafeMessage(chatId, `❌ Error: ${error.message}`);
-    }
-    clearUserState(requesterId);
-});
-
-bot.onText(/^[\/\.]setdays(?:\s+(.*))?/i, async (msg, match) => {
-    const args = match[1] ? match[1].trim().split(/\s+/) : [];
-    const requesterId = msg.from.id;
-
-    let target = args[0];
-    let days = args[1];
-    if (!target && msg.reply_to_message && msg.reply_to_message.text) {
-        const replyText = msg.reply_to_message.text.trim();
-        const parts = replyText.split(/\s+/);
-        // Si el reply tiene dos partes, asumimos usuario y cantidad
-        if (parts.length >= 2) {
-            target = parts[0];
-            days = parts[1];
-        } else {
-            // Si solo tiene una parte, es el usuario y faltan los días
-            target = parts[0];
-            days = null; // forzamos a null para que entre en modo interactivo
-        }
-    }
-
-    if (target && /^\d+$/.test(target) && parseInt(target) < 10000) {
-        // Probablemente no es un ID real, pedir de nuevo
-        target = null;
-    }
-    const role = await getUserRoleFromDB(requesterId);
-    if (role !== 'admin') return sendSafeMessage(chatId, '❌ Solo administradores pueden usar este comando.');
-    if (!target || !days) {
-        setUserState(requesterId, { step: 'awaiting_setdays' });
-        return sendSafeMessage(chatId, '📅 Envía @usuario|id y la cantidad de días (ej. @usuario 15):');
-    }
-    try {
-        const user = await findUserByUsernameOrId(target, role);
-        await callApiWithBotKey(`/admin/users/${user.id}/days`, 'PUT', { days: parseInt(days), reason: 'Ajuste por bot' });
-        await sendSafeMessage(chatId, `✅ Se establecieron ${days} días para ${user.username}.`);
-    } catch (error) {
-        await sendSafeMessage(chatId, `❌ Error: ${error.message}`);
-    }
-    clearUserState(requesterId);
-});
-
-const planConfig = {
-    '20': { credits: 20, days: 3 },
-    '60': { credits: 60, days: 7 },
-    '120': { credits: 120, days: 15 },
-    '200': { credits: 200, days: 30 }
-};
-
-bot.onText(/^[\/\.]setplan(20|60|120|200)(?:\s+([^\s]+))?/i, async (msg, match) => {
-    const chatId = msg.chat.id;
-    const requesterId = msg.from.id;
-    const plan = match[1];      // '20', '60', '120' o '200'
-    let target = match[2];      // puede ser undefined
-
-    if (!target && msg.reply_to_message && msg.reply_to_message.text) {
-        target = msg.reply_to_message.text.trim();
-    }
-
-    const role = await getUserRoleFromDB(requesterId);
-    if (role !== 'admin' && role !== 'seller') {
-        return sendSafeMessage(chatId, '❌ No tienes permiso para usar este comando.');
-    }
-
-    if (!target) {
-        setUserState(requesterId, { step: `awaiting_setplan_${plan}` });
-        return sendSafeMessage(chatId, `💎 Envía @usuario|id para asignar el plan ${plan} (${planConfig[plan].credits} créditos / ${planConfig[plan].days} días):`);
-    }
-
-    try {
-        const user = await findUserByUsernameOrId(target, role);
-        const { credits, days } = planConfig[plan];
-        await callApiWithBotKey(`/admin/users/${user.id}/credits`, 'PUT', { credits, reason: `Plan ${plan}` });
-        await callApiWithBotKey(`/admin/users/${user.id}/days`, 'PUT', { days, reason: `Plan ${plan}` });
-        await sendSafeMessage(chatId, `✅ Plan ${plan} asignado a ${user.username}: ${credits} créditos y ${days} días.`);
-    } catch (error) {
-        await sendSafeMessage(chatId, `❌ Error: ${error.message}`);
-    }
-    clearUserState(requesterId);
-});
 
 async function changeRole(chatId, requesterId, target, newRole) {
     const role = await getUserRoleFromDB(requesterId);
@@ -2144,6 +2136,134 @@ bot.on('message', async (msg) => {
             await sendSafeMessage(chatId, `❌ Error durante verificación: ${error.message}`);
         }
     }
+});
+
+bot.onText(/^[\/\.]setcredits(?:\s+([^\s]+)\s+(\d+))?/i, async (msg, match) => {
+    const chatId = msg.chat.id;
+    const requesterId = msg.from.id;
+    let target = match[1];
+    let amount = match[2];
+
+    // Si no se usó el comando con argumentos, revisar reply
+    if (!target && msg.reply_to_message && msg.reply_to_message.text) {
+        const replyText = msg.reply_to_message.text.trim();
+        const parts = replyText.split(/\s+/);
+        if (parts.length >= 2) {
+            target = parts[0];
+            amount = parts[1];
+        } else {
+            target = parts[0];
+            amount = null;
+        }
+    }
+
+    // Si el target es un ID numérico pequeño (probablemente no real), lo ignoramos
+    if (target && /^\d+$/.test(target) && parseInt(target) < 10000) {
+        target = null;
+    }
+
+    const role = await getUserRoleFromDB(requesterId);
+    if (role !== 'admin') {
+        return sendSafeMessage(chatId, '❌ Solo administradores pueden usar este comando.');
+    }
+
+    if (!target || !amount) {
+        setUserState(requesterId, { step: 'awaiting_setcredits' });
+        return sendSafeMessage(chatId, '💳 Envía @usuario|id y la cantidad de créditos (ej. @usuario 100):');
+    }
+
+    try {
+        const user = await findUserByUsernameOrId(target, role);
+        await callApiWithBotKey(`/admin/users/${user.id}/credits`, 'PUT', { credits: parseInt(amount), reason: 'Ajuste por bot' });
+        await sendSafeMessage(chatId, `✅ Se establecieron ${amount} créditos para ${user.username}.`);
+    } catch (error) {
+        await sendSafeMessage(chatId, `❌ Error: ${error.message}`);
+    }
+    clearUserState(requesterId);
+});
+
+const planConfig = {
+    '20': { credits: 20, days: 3 },
+    '60': { credits: 60, days: 7 },
+    '120': { credits: 120, days: 15 },
+    '200': { credits: 200, days: 30 }
+};
+
+bot.onText(/^[\/\.]setplan(20|60|120|200)(?:\s+([^\s]+))?/i, async (msg, match) => {
+    const chatId = msg.chat.id;
+    const requesterId = msg.from.id;
+    const plan = match[1];      // '20', '60', '120' o '200'
+    let target = match[2];      // puede ser undefined
+
+    if (!target && msg.reply_to_message && msg.reply_to_message.text) {
+        target = msg.reply_to_message.text.trim();
+    }
+
+    // Limpiar @ si viene
+    if (target && target.startsWith('@')) target = target.substring(1);
+
+    const role = await getUserRoleFromDB(requesterId);
+    if (role !== 'admin' && role !== 'seller') {
+        return sendSafeMessage(chatId, '❌ No tienes permiso para usar este comando.');
+    }
+
+    if (!target) {
+        setUserState(requesterId, { step: `awaiting_setplan_${plan}` });
+        return sendSafeMessage(chatId, `💎 Envía @usuario|id para asignar el plan ${plan} (${planConfig[plan].credits} créditos / ${planConfig[plan].days} días):`);
+    }
+
+    try {
+        const user = await findUserByUsernameOrId(target, role);
+        const { credits, days } = planConfig[plan];
+        await callApiWithBotKey(`/admin/users/${user.id}/credits`, 'PUT', { credits, reason: `Plan ${plan}` });
+        await callApiWithBotKey(`/admin/users/${user.id}/days`, 'PUT', { days, reason: `Plan ${plan}` });
+        await sendSafeMessage(chatId, `✅ Plan ${plan} asignado a ${user.username}: ${credits} créditos y ${days} días.`);
+    } catch (error) {
+        await sendSafeMessage(chatId, `❌ Error: ${error.message}`);
+    }
+    clearUserState(requesterId);
+});
+
+bot.onText(/^[\/\.]setdays(?:\s+([^\s]+)\s+(\d+))?/i, async (msg, match) => {
+    const chatId = msg.chat.id;
+    const requesterId = msg.from.id;
+    let target = match[1];
+    let days = match[2];
+
+    if (!target && msg.reply_to_message && msg.reply_to_message.text) {
+        const replyText = msg.reply_to_message.text.trim();
+        const parts = replyText.split(/\s+/);
+        if (parts.length >= 2) {
+            target = parts[0];
+            days = parts[1];
+        } else {
+            target = parts[0];
+            days = null;
+        }
+    }
+
+    if (target && /^\d+$/.test(target) && parseInt(target) < 10000) {
+        target = null;
+    }
+
+    const role = await getUserRoleFromDB(requesterId);
+    if (role !== 'admin') {
+        return sendSafeMessage(chatId, '❌ Solo administradores pueden usar este comando.');
+    }
+
+    if (!target || !days) {
+        setUserState(requesterId, { step: 'awaiting_setdays' });
+        return sendSafeMessage(chatId, '📅 Envía @usuario|id y la cantidad de días (ej. @usuario 15):');
+    }
+
+    try {
+        const user = await findUserByUsernameOrId(target, role);
+        await callApiWithBotKey(`/admin/users/${user.id}/days`, 'PUT', { days: parseInt(days), reason: 'Ajuste por bot' });
+        await sendSafeMessage(chatId, `✅ Se establecieron ${days} días para ${user.username}.`);
+    } catch (error) {
+        await sendSafeMessage(chatId, `❌ Error: ${error.message}`);
+    }
+    clearUserState(requesterId);
 });
 
 bot.onText(/^[\/\.](?:binlist|bins|list|binl|bnl)(?:\s+(.+))?/i, async (msg, match) => {
