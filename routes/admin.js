@@ -368,6 +368,7 @@ router.put('/users/:userId/status', requireRole('admin'), async (req, res) => {
 });
 
 // ========== ESTADÍSTICAS DE PLATAFORMA ==========
+// ========== ESTADÍSTICAS DE PLATAFORMA (excluyendo admins y sellers de créditos/días) ==========
 router.get('/stats/platform', requireRole('admin'), async (req, res) => {
     try {
         const stats = await pool.query(`
@@ -376,8 +377,8 @@ router.get('/stats/platform', requireRole('admin'), async (req, res) => {
                 COUNT(CASE WHEN role = 'admin' THEN 1 END) as admin_count,
                 COUNT(CASE WHEN role = 'seller' THEN 1 END) as seller_count,
                 COUNT(CASE WHEN role = 'user' THEN 1 END) as user_count,
-                COALESCE(SUM(credits), 0) as total_credits,
-                COALESCE(SUM(days_remaining), 0) as total_days,
+                COALESCE(SUM(CASE WHEN role = 'user' THEN credits ELSE 0 END), 0) as total_credits,
+                COALESCE(SUM(CASE WHEN role = 'user' THEN days_remaining ELSE 0 END), 0) as total_days,
                 COUNT(CASE WHEN is_active = FALSE THEN 1 END) as inactive_users,
                 COUNT(CASE WHEN last_login >= NOW() - INTERVAL '7 days' THEN 1 END) as active_7d,
                 COUNT(CASE WHEN created_at >= NOW() - INTERVAL '30 days' THEN 1 END) as new_users_30d
@@ -408,7 +409,6 @@ router.get('/stats/platform', requireRole('admin'), async (req, res) => {
         res.status(500).json({ success: false, error: error.message });
     }
 });
-
 // ========== OBTENER TRANSACCIONES DE SELLERS ==========
 router.get('/transactions/sellers', requireRole('admin'), async (req, res) => {
     try {
