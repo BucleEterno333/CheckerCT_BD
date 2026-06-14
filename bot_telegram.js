@@ -59,6 +59,10 @@ const bankBins = {
 
 // ========== FUNCIONES AUXILIARES ==========
 
+
+
+
+
 function getBinForBank(bankName) {
     const name = bankName.toLowerCase().trim();
     for (const [key, bins] of Object.entries(bankBins)) {
@@ -73,6 +77,27 @@ function escapeMarkdown(text) {
     if (!text) return '';
     // Escapa caracteres especiales de Markdown v2
     return text.replace(/([_*[\]()~`>#+\-=|{}.!])/g, '\\$1');
+}
+
+
+
+// Obtener el valor global de force_playwright
+async function getGlobalForcePlaywright() {
+    const res = await pool.query(`SELECT value FROM global_settings WHERE key = 'force_playwright'`);
+    if (res.rows.length === 0) {
+        await pool.query(`INSERT INTO global_settings (key, value) VALUES ('force_playwright', 'false')`);
+        return false;
+    }
+    return res.rows[0].value === 'true';
+}
+
+async function setGlobalForcePlaywright(value) {
+    await pool.query(`UPDATE global_settings SET value = $1 WHERE key = 'force_playwright'`, [value ? 'true' : 'false']);
+}
+
+// Alias para compatibilidad
+async function getUserRoleByTelegramId(telegramId) {
+    return await getUserRoleFromDB(telegramId);
 }
 
 async function sendSafeMessage(chatId, text, options = {}) {
@@ -638,6 +663,7 @@ async function handleGenCommand(chatId, telegramId, fullParam) {
             await sendSafeMessage(chatId, `🎴 *Tarjetas generadas (${tarjetas.length}):*\n${lista}${resto}`, { parse_mode: 'Markdown' });
             const creditResult = await deductCredits(telegramId, 10);
             if (creditResult?.creditsZero) await kickUserFromGroup(telegramId);
+            return;
         } else if (esBanco) {
             let binElegido = null;
             for (const [key, bins] of Object.entries(bankBins)) {
