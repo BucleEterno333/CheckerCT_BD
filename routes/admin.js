@@ -7,34 +7,21 @@ const { getSetting, setSetting } = require('../database');
 const SERVICE_API_KEY = process.env.SERVICE_API_KEY;
 const BOT_API_KEY = process.env.BOT_API_KEY;
 
-
 const allowBot = (req, res, next) => {
     const botKey = req.headers['x-bot-key'];
-    console.log('[allowBot] Header x-bot-key:', botKey, 'vs', BOT_API_KEY);
-
     if (botKey && botKey === BOT_API_KEY) {
-        // Asignar un usuario ficticio con rol admin para que pase las validaciones
         req.user = { id: 0, role: 'admin', is_active: true, credits: 999999 };
         return next();
     }
-    next(); // si no es el bot, continuar con la autenticación normal
+    next();
 };
 router.use(allowBot);
-
-
-
-
-// Todas las rutas requieren autenticación
 router.use(authenticate);
-
-
 
 const botAuth = (req, res, next) => {
     const authHeader = req.headers.authorization;
     const token = authHeader && authHeader.split(' ')[1];
-    if (token !== process.env.BOT_API_KEY) {
-        return res.status(401).json({ success: false, error: 'No autorizado' });
-    }
+    if (token !== process.env.BOT_API_KEY) return res.status(401).json({ success: false, error: 'No autorizado' });
     next();
 };
 
@@ -45,157 +32,146 @@ async function kickUserFromGroupByUserId(userId) {
     const res = await pool.query('SELECT telegram_id FROM users WHERE id = $1', [userId]);
     const telegramId = res.rows[0]?.telegram_id;
     if (telegramId) {
-        try {
-            await bot.telegram.kickChatMember(GROUP_CHAT_ID, telegramId);
-            console.log(`Usuario ${telegramId} expulsado por cero créditos/días desde admin`);
-        } catch (e) { console.error(e); }
+        try { await bot.telegram.kickChatMember(GROUP_CHAT_ID, telegramId); } catch (e) { console.error(e); }
     }
 }
 
 router.post('/bot/toggle-service', async (req, res) => {
-    // Verificar la clave del bot (puede venir en header x-bot-key o Authorization)
     const botKey = req.headers['x-bot-key'] || req.headers['authorization']?.split(' ')[1];
-    if (botKey !== BOT_API_KEY) {
-        return res.status(401).json({ success: false, error: 'No autorizado' });
-    }
-    try {
-        const current = await getSetting('cookie_generator_enabled', true);
-        const newStatus = !current;
-        await setSetting('cookie_generator_enabled', newStatus, null); // null porque es el bot
-        res.json({ success: true, enabled: newStatus });
-    } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-    }
+    if (botKey !== BOT_API_KEY) return res.status(401).json({ success: false, error: 'No autorizado' });
+    const current = await getSetting('cookie_generator_enabled', true);
+    const newStatus = !current;
+    await setSetting('cookie_generator_enabled', newStatus, null);
+    res.json({ success: true, enabled: newStatus });
 });
 
-
-// 3. Endpoint para que el generador consulte el estado (con API key, sin autenticación JWT)
 router.get('/service-status-for-generator', async (req, res) => {
     const apiKey = req.headers['x-api-key'];
-    if (apiKey !== SERVICE_API_KEY) {
-        return res.status(401).json({ success: false, error: 'No autorizado' });
-    }
+    if (apiKey !== SERVICE_API_KEY) return res.status(401).json({ success: false, error: 'No autorizado' });
     const enabled = await getSetting('cookie_generator_enabled', true);
     res.json({ success: true, enabled });
 });
 
-
-
-
-// ========== ENDPOINTS PARA EL INTERRUPTOR ==========
-
-// 1. Consultar estado actual (cualquier usuario autenticado puede verlo, pero no modificar)
 router.get('/service-status', authenticate, async (req, res) => {
-    try {
-        const enabled = await getSetting('cookie_generator_enabled', true);
-        res.json({ success: true, enabled });
-    } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-    }
+    const enabled = await getSetting('cookie_generator_enabled', true);
+    res.json({ success: true, enabled });
 });
 
-
-// 2. Cambiar estado (solo admin)
 router.post('/toggle-service', authenticate, botAuth, requireRole('admin'), async (req, res) => {
-    try {
-        const current = await getSetting('cookie_generator_enabled', true);
-        const newStatus = !current;
-        await setSetting('cookie_generator_enabled', newStatus, req.user.id);
-        res.json({ success: true, enabled: newStatus });
-    } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-    }
+    const current = await getSetting('cookie_generator_enabled', true);
+    const newStatus = !current;
+    await setSetting('cookie_generator_enabled', newStatus, req.user.id);
+    res.json({ success: true, enabled: newStatus });
 });
 
-
-
-
-
-
-
-// ========== LISTAR USUARIOS CON PAGINACIÓN CORRECTA ==========
+// ========== LISTAR USUARIOS (CORREGIDO) ==========
 router.get('/users', requireRole('admin', 'seller'), async (req, res) => {
     try {
-        const { role, page = 1, limit = 200, search = '' } = req.query;
+        const { role, page = 1, limit = 2000, search = '', min_credits, max_credits, min_days, max_days } = req.query;
         const offset = (parseInt(page) - 1) * parseInt(limit);
         
         let query = `
-            SELECT id, username, display_name, credits, days_remaining, 
-                   role, total_checks, total_lives, created_at, last_login, is_active
-            FROM users WHERE 1=1
+            SELECT 
+                u.id, u.username, u.display_name, u.credits, u.days_remaining, 
+                u.role, u.total_checks, u.total_lives, u.created_at, u.last_login, u.is_active,
+                u.cookies_generated, u.telegram_username,
+                COALESCE((
+                    SELECT SUM(ct.amount) FROM credit_transactions ct 
+                    WHERE ct.to_user_id = u.id AND ct.transaction_type = 'credits' AND ct.amount < 0
+                ), 0) * -1 AS total_credits_used,
+                COALESCE((
+                    SELECT SUM(ct.amount) FROM credit_transactions ct 
+                    WHERE ct.to_user_id = u.id AND ct.transaction_type = 'days' AND ct.amount > 0
+                ), 0) AS total_days_received
+            FROM users u
+            WHERE 1=1
         `;
         const params = [];
         let paramIndex = 1;
         
-        // Filtro por rol (si se especifica y el usuario es admin puede filtrar cualquier rol, si es seller solo ve 'user')
         if (req.user.role === 'admin' && role) {
-            query += ` AND role = $${paramIndex}`;
+            query += ` AND u.role = $${paramIndex}`;
             params.push(role);
             paramIndex++;
         } else if (req.user.role === 'seller') {
-            query += ` AND role = 'user'`;
+            query += ` AND u.role = 'user'`;
         }
         
-        // Búsqueda por username
         if (search) {
-            query += ` AND username ILIKE $${paramIndex}`;
+            query += ` AND u.username ILIKE $${paramIndex}`;
             params.push(`%${search}%`);
             paramIndex++;
         }
+        if (min_credits && min_credits !== '') {
+            query += ` AND u.credits >= $${paramIndex}`;
+            params.push(parseInt(min_credits));
+            paramIndex++;
+        }
+        if (max_credits && max_credits !== '') {
+            query += ` AND u.credits <= $${paramIndex}`;
+            params.push(parseInt(max_credits));
+            paramIndex++;
+        }
+        if (min_days && min_days !== '') {
+            query += ` AND u.days_remaining >= $${paramIndex}`;
+            params.push(parseInt(min_days));
+            paramIndex++;
+        }
+        if (max_days && max_days !== '') {
+            query += ` AND u.days_remaining <= $${paramIndex}`;
+            params.push(parseInt(max_days));
+            paramIndex++;
+        }
         
-        query += ` ORDER BY created_at DESC LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
+        query += ` ORDER BY u.created_at DESC LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
         params.push(parseInt(limit), offset);
         
         const result = await pool.query(query, params);
         
-        // Obtener total de usuarios (sin paginación)
-        let countQuery = `SELECT COUNT(*) as total FROM users WHERE 1=1`;
+        let countQuery = `SELECT COUNT(*) as total FROM users u WHERE 1=1`;
         const countParams = [];
         let countIndex = 1;
         if (req.user.role === 'admin' && role) {
-            countQuery += ` AND role = $${countIndex}`;
+            countQuery += ` AND u.role = $${countIndex}`;
             countParams.push(role);
             countIndex++;
         } else if (req.user.role === 'seller') {
-            countQuery += ` AND role = 'user'`;
+            countQuery += ` AND u.role = 'user'`;
         }
         if (search) {
-            countQuery += ` AND username ILIKE $${countIndex}`;
+            countQuery += ` AND u.username ILIKE $${countIndex}`;
             countParams.push(`%${search}%`);
+            countIndex++;
         }
+        if (min_credits) { countQuery += ` AND u.credits >= $${countIndex++}`; countParams.push(min_credits); }
+        if (max_credits) { countQuery += ` AND u.credits <= $${countIndex++}`; countParams.push(max_credits); }
+        if (min_days) { countQuery += ` AND u.days_remaining >= $${countIndex++}`; countParams.push(min_days); }
+        if (max_days) { countQuery += ` AND u.days_remaining <= $${countIndex++}`; countParams.push(max_days); }
+        
         const totalResult = await pool.query(countQuery, countParams);
         const total = parseInt(totalResult.rows[0].total);
         
         res.json({ 
             success: true,
             users: result.rows,
-            pagination: {
-                page: parseInt(page),
-                limit: parseInt(limit),
-                total: total,
-                totalPages: Math.ceil(total / parseInt(limit))
-            }
+            pagination: { page: parseInt(page), limit: parseInt(limit), total, totalPages: Math.ceil(total / parseInt(limit)) }
         });
-        
     } catch (error) {
         console.error('Error listando usuarios:', error);
         res.status(500).json({ success: false, error: error.message });
     }
 });
 
-// ========== OBTENER UN USUARIO POR ID ==========
+// ========== OBTENER UN USUARIO (con telegram_username) ==========
 router.get('/users/:userId', requireRole('admin'), async (req, res) => {
     try {
         const { userId } = req.params;
         const result = await pool.query(
-            `SELECT id, username, display_name, credits, days_remaining, role, 
-                    is_active, created_at, last_login, telegram_username, telegram_verified
+            `SELECT id, username, display_name, credits, days_remaining, role, is_active, created_at, last_login, telegram_username, telegram_verified
              FROM users WHERE id = $1`,
             [userId]
         );
-        if (result.rows.length === 0) {
-            return res.status(404).json({ success: false, error: 'Usuario no encontrado' });
-        }
+        if (result.rows.length === 0) return res.status(404).json({ success: false, error: 'Usuario no encontrado' });
         res.json({ success: true, user: result.rows[0] });
     } catch (error) {
         console.error('Error obteniendo usuario:', error);
@@ -210,32 +186,16 @@ router.put('/users/:userId/credits', requireRole('admin'), trackActivity, async 
         await client.query('BEGIN');
         const { userId } = req.params;
         let { credits, reason = '' } = req.body;
-
         const newCredits = parseInt(credits, 10);
-        if (isNaN(newCredits) || newCredits < 0) {
-            return res.status(400).json({ success: false, error: 'Créditos inválidos' });
-        }
-
+        if (isNaN(newCredits) || newCredits < 0) return res.status(400).json({ success: false, error: 'Créditos inválidos' });
         const userIdInt = parseInt(userId, 10);
         const adminId = req.user.id;
-
-        const userResult = await client.query(
-            'SELECT id, username, credits FROM users WHERE id = $1 FOR UPDATE',
-            [userIdInt]
-        );
-        if (userResult.rows.length === 0) {
-            return res.status(404).json({ success: false, error: 'Usuario no encontrado' });
-        }
-
+        const userResult = await client.query('SELECT id, username, credits FROM users WHERE id = $1 FOR UPDATE', [userIdInt]);
+        if (userResult.rows.length === 0) return res.status(404).json({ success: false, error: 'Usuario no encontrado' });
         const user = userResult.rows[0];
         const oldCredits = parseInt(user.credits, 10);
         const amount = newCredits - oldCredits;
-
-        await client.query(
-            'UPDATE users SET credits = $1, updated_at = NOW() WHERE id = $2',
-            [newCredits, userIdInt]
-        );
-
+        await client.query('UPDATE users SET credits = $1, updated_at = NOW() WHERE id = $2', [newCredits, userIdInt]);
         if (amount !== 0) {
             await client.query(
                 `INSERT INTO credit_transactions 
@@ -244,20 +204,14 @@ router.put('/users/:userId/credits', requireRole('admin'), trackActivity, async 
                 [adminId, userIdInt, amount, oldCredits, newCredits, reason || 'Ajuste por administrador']
             );
         }
-
         await client.query('COMMIT');
-
-        if (newCredits === 0) {
-            await kickUserFromGroupByUserId(userIdInt);
-        }
+        if (newCredits === 0) await kickUserFromGroupByUserId(userIdInt);
         res.json({ success: true, message: 'Créditos actualizados', old: oldCredits, new: newCredits });
     } catch (error) {
         await client.query('ROLLBACK');
         console.error('Error actualizando créditos:', error);
         res.status(500).json({ success: false, error: error.message });
-    } finally {
-        client.release();
-    }
+    } finally { client.release(); }
 });
 
 // ========== ACTUALIZAR DÍAS ==========
@@ -267,32 +221,16 @@ router.put('/users/:userId/days', requireRole('admin'), trackActivity, async (re
         await client.query('BEGIN');
         const { userId } = req.params;
         let { days, reason = '' } = req.body;
-
         const newDays = parseInt(days, 10);
-        if (isNaN(newDays) || newDays < 0) {
-            return res.status(400).json({ success: false, error: 'Días inválidos' });
-        }
-
+        if (isNaN(newDays) || newDays < 0) return res.status(400).json({ success: false, error: 'Días inválidos' });
         const userIdInt = parseInt(userId, 10);
         const adminId = req.user.id;
-
-        const userResult = await client.query(
-            'SELECT id, username, days_remaining FROM users WHERE id = $1 FOR UPDATE',
-            [userIdInt]
-        );
-        if (userResult.rows.length === 0) {
-            return res.status(404).json({ success: false, error: 'Usuario no encontrado' });
-        }
-
+        const userResult = await client.query('SELECT id, username, days_remaining FROM users WHERE id = $1 FOR UPDATE', [userIdInt]);
+        if (userResult.rows.length === 0) return res.status(404).json({ success: false, error: 'Usuario no encontrado' });
         const user = userResult.rows[0];
         const oldDays = parseInt(user.days_remaining, 10);
         const amount = newDays - oldDays;
-
-        await client.query(
-            'UPDATE users SET days_remaining = $1, updated_at = NOW() WHERE id = $2',
-            [newDays, userIdInt]
-        );
-
+        await client.query('UPDATE users SET days_remaining = $1, updated_at = NOW() WHERE id = $2', [newDays, userIdInt]);
         if (amount !== 0) {
             await client.query(
                 `INSERT INTO credit_transactions 
@@ -301,20 +239,14 @@ router.put('/users/:userId/days', requireRole('admin'), trackActivity, async (re
                 [adminId, userIdInt, amount, oldDays, newDays, reason || 'Ajuste por administrador']
             );
         }
-
         await client.query('COMMIT');
-
-        if (newDays === 0) {
-            await kickUserFromGroupByUserId(userIdInt);
-        }
+        if (newDays === 0) await kickUserFromGroupByUserId(userIdInt);
         res.json({ success: true, message: 'Días actualizados', old: oldDays, new: newDays });
     } catch (error) {
         await client.query('ROLLBACK');
         console.error('Error actualizando días:', error);
         res.status(500).json({ success: false, error: error.message });
-    } finally {
-        client.release();
-    }
+    } finally { client.release(); }
 });
 
 // ========== CAMBIAR ROL ==========
@@ -322,53 +254,30 @@ router.put('/users/:userId/role', requireRole('admin'), trackActivity, async (re
     try {
         const { userId } = req.params;
         const { new_role } = req.body;
-        
-        if (!['user', 'seller', 'admin'].includes(new_role)) {
-            return res.status(400).json({ success: false, error: 'Rol inválido' });
-        }
-        
+        if (!['user', 'seller', 'admin'].includes(new_role)) return res.status(400).json({ success: false, error: 'Rol inválido' });
         const result = await User.changeRole(userId, new_role, req.user.id);
-        
-        res.json({ 
-            success: true,
-            message: `Rol cambiado a ${new_role} exitosamente`,
-            data: result
-        });
-        
+        res.json({ success: true, message: `Rol cambiado a ${new_role}`, data: result });
     } catch (error) {
         console.error('Error cambiando rol:', error);
         res.status(500).json({ success: false, error: error.message });
     }
 });
 
-// ========== CAMBIAR ESTADO (ACTIVAR/DESACTIVAR) ==========
+// ========== CAMBIAR ESTADO ==========
 router.put('/users/:userId/status', requireRole('admin'), async (req, res) => {
     try {
         const { userId } = req.params;
         const { is_active } = req.body;
-        
-        if (typeof is_active !== 'boolean') {
-            return res.status(400).json({ success: false, error: 'is_active debe ser true o false' });
-        }
-        
-        await pool.query(
-            'UPDATE users SET is_active = $1 WHERE id = $2',
-            [is_active, userId]
-        );
-        
-        res.json({ 
-            success: true,
-            message: `Usuario ${is_active ? 'activado' : 'desactivado'} exitosamente`
-        });
-        
+        if (typeof is_active !== 'boolean') return res.status(400).json({ success: false, error: 'is_active debe ser true o false' });
+        await pool.query('UPDATE users SET is_active = $1 WHERE id = $2', [is_active, userId]);
+        res.json({ success: true, message: `Usuario ${is_active ? 'activado' : 'desactivado'}` });
     } catch (error) {
         console.error('Error cambiando estado:', error);
         res.status(500).json({ success: false, error: error.message });
     }
 });
 
-// ========== ESTADÍSTICAS DE PLATAFORMA ==========
-// ========== ESTADÍSTICAS DE PLATAFORMA (excluyendo admins y sellers de créditos/días) ==========
+// ========== ESTADÍSTICAS (excluyendo admins/sellers) ==========
 router.get('/stats/platform', requireRole('admin'), async (req, res) => {
     try {
         const stats = await pool.query(`
@@ -384,7 +293,6 @@ router.get('/stats/platform', requireRole('admin'), async (req, res) => {
                 COUNT(CASE WHEN created_at >= NOW() - INTERVAL '30 days' THEN 1 END) as new_users_30d
             FROM users
         `);
-        
         const transactions = await pool.query(`
             SELECT 
                 COUNT(*) as total_transactions,
@@ -395,31 +303,19 @@ router.get('/stats/platform', requireRole('admin'), async (req, res) => {
             FROM credit_transactions
             WHERE transaction_type IN ('credits', 'days')
         `);
-        
-        res.json({ 
-            success: true,
-            stats: {
-                ...stats.rows[0],
-                ...transactions.rows[0]
-            }
-        });
-        
+        res.json({ success: true, stats: { ...stats.rows[0], ...transactions.rows[0] } });
     } catch (error) {
         console.error('Error obteniendo estadísticas:', error);
         res.status(500).json({ success: false, error: error.message });
     }
 });
-// ========== OBTENER TRANSACCIONES DE SELLERS ==========
+
 router.get('/transactions/sellers', requireRole('admin'), async (req, res) => {
     try {
         const { page = 1, limit = 50 } = req.query;
         const offset = (parseInt(page) - 1) * parseInt(limit);
-        
         const result = await pool.query(
-            `SELECT ct.*, 
-                    u.username as seller_username,
-                    u2.username as user_username,
-                    u.role as seller_role
+            `SELECT ct.*, u.username as seller_username, u2.username as user_username, u.role as seller_role
              FROM credit_transactions ct
              JOIN users u ON ct.from_user_id = u.id AND u.role = 'seller'
              JOIN users u2 ON ct.to_user_id = u2.id
@@ -427,16 +323,7 @@ router.get('/transactions/sellers', requireRole('admin'), async (req, res) => {
              LIMIT $1 OFFSET $2`,
             [parseInt(limit), offset]
         );
-        
-        res.json({ 
-            success: true,
-            transactions: result.rows,
-            pagination: {
-                page: parseInt(page),
-                limit: parseInt(limit)
-            }
-        });
-        
+        res.json({ success: true, transactions: result.rows, pagination: { page: parseInt(page), limit: parseInt(limit) } });
     } catch (error) {
         console.error('Error obteniendo transacciones:', error);
         res.status(500).json({ success: false, error: error.message });
