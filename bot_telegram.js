@@ -2210,12 +2210,6 @@ const planConfig = {
     '200': { credits: 200, days: 30 }
 };
 
-const planConfig = {
-    '20': { credits: 20, days: 3 },
-    '60': { credits: 60, days: 7 },
-    '120': { credits: 120, days: 15 },
-    '200': { credits: 200, days: 30 }
-};
 
 bot.onText(/^[\/\.]setplan(20|60|120|200)(?:\s+([^\s]+))?/i, async (msg, match) => {
     const chatId = msg.chat.id;
