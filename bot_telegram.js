@@ -146,6 +146,9 @@ async function notifyAdminsAndGroups(message, parseMode = 'Markdown') {
         }
     }
 }
+
+
+
 function limpiarTarjetas(textoSucio) {
     let texto = textoSucio.replace(/\r\n/g, '\n').replace(/\n+/g, '\n').trim();
     const lineas = texto.split('\n');
