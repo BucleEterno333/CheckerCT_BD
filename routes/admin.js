@@ -333,4 +333,23 @@ router.get('/transactions/sellers', requireRole('admin'), async (req, res) => {
     }
 });
 
+
+// GET /api/settings/force-playwright - Público (sin autenticación)
+router.get('/settings/force-playwright', async (req, res) => {
+    try {
+        const result = await pool.query(`SELECT value FROM global_settings WHERE key = 'force_playwright'`);
+        let enabled = false;
+        if (result.rows.length === 0) {
+            // Insertar valor por defecto si no existe
+            await pool.query(`INSERT INTO global_settings (key, value) VALUES ('force_playwright', 'false')`);
+        } else {
+            enabled = result.rows[0].value === 'true';
+        }
+        res.json({ success: true, enabled });
+    } catch (error) {
+        console.error('Error obteniendo force_playwright:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
 module.exports = router;
