@@ -2,7 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const { pool, initDatabase } = require('./database');
-const loggingMiddleware = require('./middlewares/loggingMiddleware');
+const loggingMiddleware = require('./middleware/loggingMiddleware');
 
 const app = express();
 app.use(loggingMiddleware);
