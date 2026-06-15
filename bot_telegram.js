@@ -901,10 +901,10 @@ bot.onText(/^[\/\.]start/, async (msg) => {
 
 // ========== COMANDOS DE ADMINISTRACIÓN ==========
 const planConfig = {
-    '20': { credits: 20, days: 3 },
-    '60': { credits: 60, days: 7 },
-    '120': { credits: 120, days: 15 },
-    '200': { credits: 200, days: 30 }
+    '40': { credits: 40, days: 3 },
+    '80': { credits: 80, days: 7 },
+    '150': { credits: 150, days: 15 },
+    '250': { credits: 250, days: 30 }
 };
 
 bot.onText(/^[\/\.]setcredits(?:\s+([^\s]+)\s+(\d+))?/i, async (msg, match) => {
@@ -993,7 +993,7 @@ bot.onText(/^[\/\.]setdays(?:\s+([^\s]+)\s+(\d+))?/i, async (msg, match) => {
     clearUserState(requesterTelegramId);
 });
 
-bot.onText(/^[\/\.]setplan(20|60|120|200)(?:\s+([^\s]+))?/i, async (msg, match) => {
+bot.onText(/^[\/\.]setplan(40|80|150|250)(?:\s+([^\s]+))?/i, async (msg, match) => {
     const chatId = msg.chat.id;
     const requesterTelegramId = msg.from.id;
     const plan = match[1];
