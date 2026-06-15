@@ -2,12 +2,14 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const { pool, initDatabase } = require('./database');
+const loggingMiddleware = require('./middlewares/loggingMiddleware');
 
 const app = express();
+app.use(loggingMiddleware);
+
 const PORT = process.env.PORT || 8080; 
 const cron = require('node-cron');
 const { sendSafeMessage } = require('./bot_telegram');
-const loggingMiddleware = require('./middleware/loggingMiddleware');
 
 
 // 1. CORS
@@ -17,7 +19,6 @@ app.use(cors({
     optionsSuccessStatus: 200
 }));
 
-app.use(loggingMiddleware);
 
 
 // 2. Parseo de JSON (IMPORTANTE: ANTES de las rutas)

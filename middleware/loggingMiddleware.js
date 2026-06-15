@@ -3,7 +3,12 @@ const uaParser = require('ua-parser-js');
 const { pool } = require('../database'); // Ajusta la ruta según tu estructura
 
 const loggingMiddleware = async (req, res, next) => {
+
+
     try {
+
+        console.log('🟢 Logging middleware ejecutado para', req.method, req.url);
+        
         // Obtener IP real (detecta proxies como Cloudflare)
         const ip = req.headers['cf-connecting-ip'] || 
                    req.headers['x-forwarded-for'] || 
