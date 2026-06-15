@@ -1,40 +1,5 @@
-// utils/deviceUtils.js
 const { pool } = require('../database');
-
-
-async function notifyAdminsAndGroups(message, parseMode = 'Markdown') {
-    // Notificar a administradores
-    const adminsRes = await pool.query('SELECT telegram_id FROM users WHERE role = $1 AND telegram_id IS NOT NULL', ['admin']);
-    for (const admin of adminsRes.rows) {
-        if (admin.telegram_id) {
-            try {
-                await bot.sendMessage(admin.telegram_id, message, { parse_mode: parseMode });
-            } catch (err) { console.error('Error notificando admin:', err.message); }
-        }
-    }
-    // Notificar al grupo principal
-    const GROUP_CHAT_ID = process.env.GROUP_CHAT_ID;
-    if (GROUP_CHAT_ID) {
-        try {
-            await bot.sendMessage(GROUP_CHAT_ID, message, { parse_mode: parseMode });
-        } catch (err) {
-            console.error('Error notificando al grupo:', err.message);
-            if (err.message && err.message.includes('upgraded to a supergroup')) {
-                // Obtener el nuevo ID del grupo si es posible
-                try {
-                    const chat = await bot.getChat(GROUP_CHAT_ID);
-                    const newId = chat.id;
-                    const errorMsg = `⚠️ El grupo ha sido actualizado a supergrupo.\nAntiguo ID: ${GROUP_CHAT_ID}\nNuevo ID: ${newId}\nActualiza la variable GROUP_CHAT_ID en el entorno y reinicia el bot.`;
-                    for (const admin of adminsRes.rows) {
-                        if (admin.telegram_id) await bot.sendMessage(admin.telegram_id, errorMsg, { parse_mode: 'Markdown' }).catch(() => {});
-                    }
-                } catch (e) {
-                    console.error('No se pudo obtener el nuevo ID del grupo:', e.message);
-                }
-            }
-        }
-    }
-}
+const { notifyAdminsAndGroups } = require('./notifications'); // Crearemos este archivo después
 
 // Verificar si un dispositivo está baneado
 async function isDeviceBanned(deviceFingerprint) {
@@ -89,7 +54,7 @@ async function banDevice(deviceFingerprint, reason, adminId) {
          SET reason = EXCLUDED.reason, banned_by = EXCLUDED.banned_by, created_at = NOW()`,
         [deviceFingerprint, reason, adminId]
     );
-    // Desactivar todos los usuarios que usaron ese dispositivo
+    // Opcional: desactivar todos los usuarios que usaron ese dispositivo
     await pool.query(
         `UPDATE users SET is_active = false 
          WHERE id IN (SELECT DISTINCT user_id FROM access_logs WHERE device_fingerprint = $1)`,
