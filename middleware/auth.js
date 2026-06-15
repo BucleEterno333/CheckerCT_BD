@@ -1,10 +1,11 @@
 // middleware/auth.js
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const { logUserAccess } = require('../utils/deviceUtils'); // <--- IMPORTAR
 
 const JWT_SECRET = process.env.JWT_SECRET || 'checkerct-secret-key';
 
-// Middleware de autenticación
+// Middleware de autenticación (ahora también guarda log de acceso)
 const authenticate = async (req, res, next) => {
     try {
         const authHeader = req.headers['authorization'];
@@ -27,7 +28,6 @@ const authenticate = async (req, res, next) => {
             });
         }
         
-        // ========== NUEVA VERIFICACIÓN: CRÉDITOS CERO ==========
         if (user.credits <= 0) {
             return res.status(401).json({
                 success: false,
@@ -35,7 +35,23 @@ const authenticate = async (req, res, next) => {
                 credits_zero: true
             });
         }
-        // ======================================================
+        
+        // ========== GUARDAR LOG DE ACCESO CON USER_ID ==========
+        try {
+            const ip = req.headers['cf-connecting-ip'] || 
+                       req.headers['x-forwarded-for'] || 
+                       req.connection?.remoteAddress || 
+                       req.ip || 
+                       '0.0.0.0';
+            const userAgent = req.headers['user-agent'] || '';
+            const deviceFingerprint = req.body?.device_fingerprint || null;
+            
+            await logUserAccess(user.id, deviceFingerprint, ip, userAgent, req);
+        } catch (logError) {
+            console.error('Error guardando log de acceso:', logError.message);
+            // No bloqueamos la autenticación por un error de log
+        }
+        // ========================================================
         
         req.user = user;
         next();
@@ -69,7 +85,7 @@ const requireRole = (...roles) => {
     };
 };
 
-// Middleware para registrar IP y user agent
+// Middleware para registrar IP y user agent (opcional, lo usamos para trackActivity)
 const trackActivity = async (req, res, next) => {
     req.clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
     req.userAgent = req.headers['user-agent'];
