@@ -7,6 +7,7 @@ const app = express();
 const PORT = process.env.PORT || 8080; 
 const cron = require('node-cron');
 const { sendSafeMessage } = require('./bot_telegram');
+const loggingMiddleware = require('./middlewares/loggingMiddleware');
 
 
 // 1. CORS
@@ -15,6 +16,9 @@ app.use(cors({
     credentials: true,
     optionsSuccessStatus: 200
 }));
+
+app.use(loggingMiddleware);
+
 
 // 2. Parseo de JSON (IMPORTANTE: ANTES de las rutas)
 app.use(express.json());
