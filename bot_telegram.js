@@ -5,7 +5,7 @@
 const TelegramBot = require('node-telegram-bot-api');
 const { Pool } = require('pg');
 const cron = require('node-cron');
-const { isDeviceBanned, logUserAccess, detectMulticuentas, banDevice, unbanDevice, getUserDevices } = require('../utils/deviceUtils');
+const { isDeviceBanned, logUserAccess, detectMulticuentas, banDevice, unbanDevice, getUserDevices } = require('./utils/deviceUtils');
 
 // ========== CONFIGURACIÓN ==========
 const token = process.env.TELEGRAM_BOT_TOKEN;
