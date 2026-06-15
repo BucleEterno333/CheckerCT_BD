@@ -5,6 +5,7 @@
 const TelegramBot = require('node-telegram-bot-api');
 const { Pool } = require('pg');
 const cron = require('node-cron');
+const { isDeviceBanned, logUserAccess, detectMulticuentas, banDevice, unbanDevice, getUserDevices } = require('../utils/deviceUtils');
 
 // ========== CONFIGURACIÓN ==========
 const token = process.env.TELEGRAM_BOT_TOKEN;
@@ -853,6 +854,40 @@ async function procesarExtraConCantidad(chatId, telegramId, extra, cantidad) {
     await sendSafeMessage(chatId, resumen, { parse_mode: 'Markdown' });
 }
 
+
+async function getUserDevicesForBot(userId) {
+    const res = await pool.query(
+        `SELECT device_fingerprint, COUNT(*) as times_used, array_agg(DISTINCT ip_address) as ips, MAX(created_at) as last_seen
+         FROM access_logs WHERE user_id = $1 GROUP BY device_fingerprint`,
+        [userId]
+    );
+    return res.rows;
+}
+
+async function detectMulticuentasForBot(deviceFingerprint, newUserId, newUsername) { 
+
+    if (!deviceFingerprint) return null;
+    const res = await pool.query(
+        `SELECT DISTINCT u.id, u.username, u.role, al.created_at as last_used
+         FROM access_logs al
+         JOIN users u ON al.user_id = u.id
+         WHERE al.device_fingerprint = $1 AND al.user_id != $2
+         ORDER BY al.created_at DESC`,
+        [deviceFingerprint, newUserId]
+    );
+    if (res.rows.length > 0) {
+        const message = `⚠️ *POSIBLE MULTICUENTA DETECTADA* ⚠️\n\n` +
+                        `🔹 Nuevo usuario: ${newUsername} (ID: ${newUserId})\n` +
+                        `🔹 Mismo fingerprint que:\n` +
+                        res.rows.map(u => `   • ${u.username} (ID: ${u.id}, rol: ${u.role})`).join('\n') +
+                        `\n\n📅 Detectado automáticamente.`;
+        await notifyAdminsAndGroups(message);
+        return res.rows;
+    }
+    return null;
+}
+
+
 // ========== COMANDOS ==========
 
 bot.onText(/^[\/\.]start/, async (msg) => {
@@ -1132,6 +1167,67 @@ bot.onText(/^[\/\.]setuser(?:\s+([^\s]+))?/i, async (msg, match) => {
     }
     clearUserState(requesterTelegramId);
 });
+
+
+
+// ========== COMANDOS PARA MULTICUENTAS ==========
+// /multicuentas - Lista usuarios que comparten fingerprint
+bot.onText(/^[\/\.]multicuentas$/i, async (msg) => {
+    const chatId = msg.chat.id;
+    const role = await getUserRoleFromDB(msg.from.id);
+    if (role !== 'admin') return sendSafeMessage(chatId, '❌ Solo administradores.');
+    
+    const res = await pool.query(`
+        SELECT al.device_fingerprint, 
+               array_agg(DISTINCT u.username) as usernames,
+               COUNT(DISTINCT u.id) as user_count
+        FROM access_logs al
+        JOIN users u ON al.user_id = u.id
+        WHERE al.device_fingerprint IS NOT NULL
+        GROUP BY al.device_fingerprint
+        HAVING COUNT(DISTINCT u.id) > 1
+        ORDER BY user_count DESC
+        LIMIT 20
+    `);
+    if (res.rows.length === 0) return sendSafeMessage(chatId, '✅ No se detectaron multicuentas sospechosas.');
+    
+    let message = '🚨 *POSIBLES MULTICUENTAS* 🚨\n\n';
+    for (const row of res.rows) {
+        message += `🔹 Fingerprint: \`${row.device_fingerprint.slice(0, 16)}...\`\n`;
+        message += `👥 Usuarios: ${row.usernames.join(', ')}\n`;
+        message += `📊 Total: ${row.user_count} cuentas\n\n`;
+    }
+    await sendSafeMessage(chatId, message, { parse_mode: 'Markdown' });
+});
+
+// /dispositivos @usuario - Ver dispositivos de un usuario
+bot.onText(/^[\/\.]dispositivos\s+([^\s]+)/i, async (msg, match) => {
+    const chatId = msg.chat.id;
+    const requesterRole = await getUserRoleFromDB(msg.from.id);
+    if (requesterRole !== 'admin') return sendSafeMessage(chatId, '❌ Solo administradores.');
+    
+    let target = match[1];
+    if (target.startsWith('@')) target = target.substring(1);
+    
+    try {
+        const user = await findUserByUsernameOrId(target, requesterRole);
+        const devices = await getUserDevices(user.id);
+        if (devices.length === 0) return sendSafeMessage(chatId, `📭 ${user.username} no tiene dispositivos registrados.`);
+        
+        let message = `📱 *Dispositivos de ${user.username}*\n\n`;
+        for (const d of devices) {
+            message += `🔹 Fingerprint: \`${d.device_fingerprint.slice(0, 16)}...\`\n`;
+            message += `📅 Último uso: ${new Date(d.last_seen).toLocaleString()}\n`;
+            message += `🌐 IPs: ${d.ips.slice(0, 3).join(', ')}\n\n`;
+        }
+        await sendSafeMessage(chatId, message, { parse_mode: 'Markdown' });
+    } catch (error) {
+        await sendSafeMessage(chatId, `❌ ${error.message}`);
+    }
+});
+
+
+
 
 bot.onText(/^[\/\.]ban(?:\s+([^\s]+))?/i, async (msg, match) => {
     const chatId = msg.chat.id;
@@ -1749,6 +1845,31 @@ cron.schedule('0 3 * * *', async () => {
     }
 });
 
+
+cron.schedule('0 2 * * *', async () => {
+    console.log('🔄 Revisando multicuentas por fingerprint...');
+    const res = await pool.query(`
+        SELECT al.device_fingerprint, 
+               array_agg(DISTINCT u.username) as usernames,
+               array_agg(DISTINCT u.id) as user_ids,
+               COUNT(DISTINCT u.id) as user_count
+        FROM access_logs al
+        JOIN users u ON al.user_id = u.id
+        WHERE al.device_fingerprint IS NOT NULL
+          AND al.created_at > NOW() - INTERVAL '7 days'
+        GROUP BY al.device_fingerprint
+        HAVING COUNT(DISTINCT u.id) > 1
+    `);
+    if (res.rows.length > 0) {
+        let message = '📊 *REPORTE DIARIO - MULTICUENTAS* 📊\n\nSe detectaron las siguientes coincidencias en los últimos 7 días:\n\n';
+        for (const row of res.rows.slice(0, 10)) {
+            message += `🔹 \`${row.device_fingerprint.slice(0, 12)}...\` → ${row.user_count} cuentas: ${row.usernames.join(', ')}\n`;
+        }
+        if (res.rows.length > 10) message += `\n... y ${res.rows.length - 10} más.`;
+        await notifyAdminsAndGroups(message);
+    }
+});
+
 // ========== MANEJADOR DE MENSAJES PARA ESTADOS INTERACTIVOS ==========
 bot.on('message', async (msg) => {
     const telegramId = msg.from.id;
@@ -1826,5 +1947,8 @@ bot.on('message', async (msg) => {
             break;
     }
 });
+
+
+
 
 console.log('✅ Bot mejorado listo y funcionando');

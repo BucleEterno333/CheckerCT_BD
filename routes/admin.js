@@ -6,6 +6,7 @@ const { pool } = require('../database');
 const { getSetting, setSetting } = require('../database');
 const SERVICE_API_KEY = process.env.SERVICE_API_KEY;
 const BOT_API_KEY = process.env.BOT_API_KEY;
+const { getUserDevices, banDevice, unbanDevice, detectMulticuentas } = require('../utils/deviceUtils');
 
 const allowBot = (req, res, next) => {
     const botKey = req.headers['x-bot-key'];
@@ -353,27 +354,45 @@ router.get('/settings/force-playwright', async (req, res) => {
 });
 
 
-// Ejemplo de endpoint para admin
-router.get('/admin/user-insights/:userId', requireRole('admin'), async (req, res) => {
-    const userId = req.params.userId;
-    // Obtener todos los dispositivos usados por este usuario
-    const devices = await pool.query(
-        `SELECT device_fingerprint, COUNT(*) as access_count, 
-         array_agg(DISTINCT ip_address) as ips,
-         MAX(created_at) as last_seen
-         FROM access_logs WHERE user_id = $1 GROUP BY device_fingerprint`,
-        [userId]
-    );
-    // Buscar otros usuarios que hayan usado esos mismos fingerprints
-    const relatedUsers = await pool.query(`
-        SELECT DISTINCT al2.user_id, u.username 
-        FROM access_logs al2
-        JOIN users u ON al2.user_id = u.id
-        WHERE al2.device_fingerprint IN (SELECT device_fingerprint FROM access_logs WHERE user_id = $1)
-        AND al2.user_id != $1
-    `, [userId]);
-    
-    res.json({ success: true, devices: devices.rows, relatedUsers: relatedUsers.rows });
+// Obtener dispositivos de un usuario específico
+router.get('/users/:userId/devices', requireRole('admin'), async (req, res) => {
+    const devices = await getUserDevices(req.params.userId);
+    res.json({ success: true, devices });
+});
+
+// Obtener multicuentas sospechosas (usuarios que comparten fingerprint)
+router.get('/suspicious-multicuentas', requireRole('admin'), async (req, res) => {
+    const result = await pool.query(`
+        SELECT al.device_fingerprint, 
+               array_agg(DISTINCT u.id) as user_ids,
+               array_agg(DISTINCT u.username) as usernames,
+               COUNT(DISTINCT u.id) as user_count,
+               MAX(al.created_at) as last_used
+        FROM access_logs al
+        JOIN users u ON al.user_id = u.id
+        WHERE al.device_fingerprint IS NOT NULL
+        GROUP BY al.device_fingerprint
+        HAVING COUNT(DISTINCT u.id) > 1
+        ORDER BY user_count DESC
+    `);
+    res.json({ success: true, suspicious: result.rows });
+});
+
+// Banear un dispositivo (por fingerprint)
+router.post('/ban-device', requireRole('admin'), async (req, res) => {
+    const { device_fingerprint, reason } = req.body;
+    if (!device_fingerprint) return res.status(400).json({ success: false, error: 'Fingerprint requerido' });
+    await banDevice(device_fingerprint, reason, req.user.id);
+    // Notificar a admins
+    await notifyAdminsAndGroups(`🔒 *DISPOSITIVO BANEADO*\nFingerprint: \`${device_fingerprint}\`\nRazón: ${reason || 'No especificada'}\nPor: ${req.user.username}`);
+    res.json({ success: true });
+});
+
+// Desbanear un dispositivo
+router.post('/unban-device', requireRole('admin'), async (req, res) => {
+    const { device_fingerprint } = req.body;
+    await unbanDevice(device_fingerprint);
+    res.json({ success: true });
 });
 
 module.exports = router;

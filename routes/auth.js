@@ -9,7 +9,7 @@ const { trackActivity } = require('../middleware/auth');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'checkerct-secret-key';
 const { sendSafeMessage } = require('../bot_telegram');
-
+const { isDeviceBanned, logUserAccess, detectMulticuentas } = require('../utils/deviceUtils');
 
 // ========== REGISTRO (CORREGIDO) ==========
 router.post('/register', trackActivity, async (req, res) => {
@@ -424,10 +424,10 @@ router.post('/verify-code', trackActivity, async (req, res) => {
     }
 });
 
-// ========== LOGIN ==========
+// ========== LOGIN (con fingerprint y control de créditos) ==========
 router.post('/login', trackActivity, async (req, res) => {
     try {
-        const { username, password } = req.body;
+        const { username, password, device_fingerprint } = req.body;
         
         if (!username || !password) {
             return res.status(400).json({ 
@@ -438,6 +438,17 @@ router.post('/login', trackActivity, async (req, res) => {
         
         // Quitar @ si existe
         const cleanUsername = username.startsWith('@') ? username.slice(1) : username;
+        
+        // Verificar si el dispositivo está baneado (si se proporcionó fingerprint)
+        if (device_fingerprint) {
+            const banned = await isDeviceBanned(device_fingerprint);
+            if (banned) {
+                return res.status(403).json({ 
+                    success: false, 
+                    error: 'Este dispositivo está baneado. Contacta al administrador.' 
+                });
+            }
+        }
         
         // Buscar usuario
         const userResult = await pool.query(
@@ -475,12 +486,22 @@ router.post('/login', trackActivity, async (req, res) => {
             });
         }
 
-        // NUEVA VERIFICACIÓN: si tiene 0 créditos, no puede iniciar sesión
+        // Verificar créditos > 0
         if (user.credits <= 0) {
             return res.status(403).json({
                 success: false,
                 error: 'No tienes créditos disponibles. Contacta al administrador.'
             });
+        }
+        
+        // Registrar acceso (IP, user agent, fingerprint)
+        if (device_fingerprint) {
+            const ip = req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for'] || req.connection.remoteAddress;
+            const userAgent = req.headers['user-agent'];
+            await logUserAccess(user.id, device_fingerprint, ip, userAgent, req);
+            
+            // Detectar multicuentas (no bloquea, solo notifica)
+            await detectMulticuentas(device_fingerprint, user.id, user.username);
         }
         
         // Actualizar último login
@@ -531,7 +552,6 @@ router.post('/login', trackActivity, async (req, res) => {
         });
     }
 });
-
 // ========== VERIFICAR TOKEN ==========
 router.post('/verify', trackActivity, async (req, res) => {
     try {
@@ -596,6 +616,9 @@ router.post('/verify', trackActivity, async (req, res) => {
         });
     }
 });
+
+
+
 
 // ========== VERIFICAR DISPONIBILIDAD DE USUARIO ==========
 router.get('/check-username/:username', async (req, res) => {

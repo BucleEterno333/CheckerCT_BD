@@ -3,8 +3,9 @@ const router = express.Router();
 const { authenticate } = require('../middleware/auth');
 const User = require('../models/User');
 const { pool } = require('../database');
-
+const { isDeviceBanned, logUserAccess, detectMulticuentas, banDevice, unbanDevice, getUserDevices } = require('../utils/deviceUtils');
 const BOT_API_KEY = process.env.BOT_API_KEY || 'AALOL23894238HWKEJSNFSDGF';
+
 
 // ========== RUTAS PÚBLICAS PARA EL BOT ==========
 router.post('/bot/use-credits', async (req, res) => {
