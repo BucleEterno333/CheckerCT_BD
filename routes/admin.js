@@ -352,4 +352,28 @@ router.get('/settings/force-playwright', async (req, res) => {
     }
 });
 
+
+// Ejemplo de endpoint para admin
+router.get('/admin/user-insights/:userId', requireRole('admin'), async (req, res) => {
+    const userId = req.params.userId;
+    // Obtener todos los dispositivos usados por este usuario
+    const devices = await pool.query(
+        `SELECT device_fingerprint, COUNT(*) as access_count, 
+         array_agg(DISTINCT ip_address) as ips,
+         MAX(created_at) as last_seen
+         FROM access_logs WHERE user_id = $1 GROUP BY device_fingerprint`,
+        [userId]
+    );
+    // Buscar otros usuarios que hayan usado esos mismos fingerprints
+    const relatedUsers = await pool.query(`
+        SELECT DISTINCT al2.user_id, u.username 
+        FROM access_logs al2
+        JOIN users u ON al2.user_id = u.id
+        WHERE al2.device_fingerprint IN (SELECT device_fingerprint FROM access_logs WHERE user_id = $1)
+        AND al2.user_id != $1
+    `, [userId]);
+    
+    res.json({ success: true, devices: devices.rows, relatedUsers: relatedUsers.rows });
+});
+
 module.exports = router;
