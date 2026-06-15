@@ -5,7 +5,6 @@ const { pool, initDatabase } = require('./database');
 const loggingMiddleware = require('./middleware/loggingMiddleware');
 
 const app = express();
-app.use(loggingMiddleware);
 
 const PORT = process.env.PORT || 8080; 
 const cron = require('node-cron');
@@ -24,6 +23,11 @@ app.use(cors({
 // 2. Parseo de JSON (IMPORTANTE: ANTES de las rutas)
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+
+app.use(loggingMiddleware);
+
+
 
 // RUTA RAIZ - IMPORTANTE
 app.get('/', (req, res) => {
