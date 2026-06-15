@@ -19,7 +19,11 @@ const authenticate = async (req, res, next) => {
         }
         
         const decoded = jwt.verify(token, JWT_SECRET);
-        const user = await User.findById(decoded.id);
+        const userResult = await pool.query(
+            'SELECT id, username, role, credits, days_remaining, is_active, device_fingerprint FROM users WHERE id = $1',
+            [decoded.id]
+        );
+        const user = userResult.rows[0];
         
         if (!user || !user.is_active) {
             return res.status(401).json({ 
@@ -39,17 +43,16 @@ const authenticate = async (req, res, next) => {
         // ========== GUARDAR LOG DE ACCESO CON USER_ID ==========
         try {
             const ip = req.headers['cf-connecting-ip'] || 
-                       req.headers['x-forwarded-for'] || 
-                       req.connection?.remoteAddress || 
-                       req.ip || 
-                       '0.0.0.0';
+                    req.headers['x-forwarded-for'] || 
+                    req.connection?.remoteAddress || 
+                    req.ip || 
+                    '0.0.0.0';
             const userAgent = req.headers['user-agent'] || '';
-            const deviceFingerprint = req.body?.device_fingerprint || null;
-            
+            const deviceFingerprint = user.device_fingerprint; // <--- CAMBIADO
+
             await logUserAccess(user.id, deviceFingerprint, ip, userAgent, req);
         } catch (logError) {
             console.error('Error guardando log de acceso:', logError.message);
-            // No bloqueamos la autenticación por un error de log
         }
         // ========================================================
         

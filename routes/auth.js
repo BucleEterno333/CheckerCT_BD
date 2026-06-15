@@ -28,7 +28,7 @@ router.post('/register', trackActivity, async (req, res) => {
         const salt = await bcrypt.genSalt(10);
         const passwordHash = await bcrypt.hash(password, salt);
         await client.query(
-            `UPDATE users SET password_hash = $1, display_name = $2, credits = 4, days_remaining = 1, 
+            `UPDATE users SET password_hash = $1, display_name = $2, credits = 5, days_remaining = 3, 
              telegram_username = $3, is_active = FALSE, updated_at = NOW() WHERE id = $4`,
             [passwordHash, display_name || username, `@${username}`, user.id]
         );
@@ -41,6 +41,14 @@ router.post('/register', trackActivity, async (req, res) => {
         if (bot && user.telegram_chat_id) {
             await sendSafeMessage(user.telegram_chat_id, `🔐 Código: *${verificationCode}* (válido 2 min)`, { parse_mode: 'Markdown' });
         }
+
+        if (device_fingerprint) {
+            await client.query(
+                'UPDATE users SET device_fingerprint = $1 WHERE id = $2',
+                [device_fingerprint, user.id]
+            );
+        }
+
         await client.query('COMMIT');
         res.json({ success: true, requires_verification: true, user: { id: user.id, username } });
     } catch (error) {
@@ -112,18 +120,30 @@ router.post('/login', trackActivity, async (req, res) => {
         if (!username || !password) return res.status(400).json({ success: false, error: 'Datos incompletos' });
         const cleanUsername = username.replace(/^@/, '');
         
-        if (device_fingerprint && await isDeviceBanned(device_fingerprint)) {
-            return res.status(403).json({ success: false, error: 'Dispositivo baneado' });
-        }
+
+
+
         
         const userResult = await pool.query(`SELECT * FROM users WHERE username = $1`, [cleanUsername]);
         if (userResult.rows.length === 0) return res.status(401).json({ success: false, error: 'Credenciales incorrectas' });
         const user = userResult.rows[0];
+
+        if (device_fingerprint) {
+            await pool.query('UPDATE users SET device_fingerprint = $1 WHERE id = $2', [device_fingerprint, user.id]);
+        }
+
+
+        if (device_fingerprint && await isDeviceBanned(device_fingerprint)) {
+            return res.status(403).json({ success: false, error: 'Dispositivo baneado' });
+        }
+
         if (!user.is_active) return res.status(403).json({ success: false, error: 'Cuenta no verificada', requires_verification: true });
         const validPassword = await bcrypt.compare(password, user.password_hash);
         if (!validPassword) return res.status(401).json({ success: false, error: 'Credenciales incorrectas' });
         if (user.credits <= 0) return res.status(403).json({ success: false, error: 'No tienes créditos' });
-        
+
+    
+        // Guardar log de acceso (con el fingerprint del body)
         if (device_fingerprint) {
             const ip = req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for'] || req.connection.remoteAddress;
             const userAgent = req.headers['user-agent'];
