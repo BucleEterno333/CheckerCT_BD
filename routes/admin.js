@@ -48,10 +48,7 @@ router.post('/bot/toggle-service', async (req, res) => {
 });
 
 router.get('/service-status-for-generator', async (req, res) => {
-    const apiKey = req.headers['x-api-key'];
-        if (apiKey !== SERVICE_API_KEY && apiKey !== BOT_API_KEY) {
-            return res.status(401).json({ success: false, error: 'No autorizado' });
-        }
+
     const enabled = await getSetting('cookie_generator_enabled', true);
     res.json({ success: true, enabled });
 });
