@@ -2,7 +2,7 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const { logUserAccess } = require('../utils/deviceUtils'); // <--- IMPORTAR
-
+const { pool } = require('../database');   // ❌ falta esta línea
 const JWT_SECRET = process.env.JWT_SECRET || 'checkerct-secret-key';
 
 // Middleware de autenticación (ahora también guarda log de acceso)
