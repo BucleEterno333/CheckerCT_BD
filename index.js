@@ -11,14 +11,26 @@ const cron = require('node-cron');
 const { sendSafeMessage } = require('./bot_telegram');
 
 
-// 1. CORS
-app.use(cors({
-    origin: ['https://astralchk.com'],
+// Configuración de CORS mejorada
+const corsOptions = {
+    origin: function (origin, callback) {
+        // Permitir solicitudes desde astralchk.com y también desde el mismo origen
+        const allowedOrigins = ['https://astralchk.com', 'https://site--checkerct--slm72jkyf6vq.code.run'];
+        if (!origin || allowedOrigins.includes(origin)) {
+            callback(null, true);
+        } else {
+            callback(new Error('Origen no permitido por CORS'));
+        }
+    },
     credentials: true,
-    optionsSuccessStatus: 200
-}));
+    optionsSuccessStatus: 200,
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH']
+};
 
-
+// Aplica CORS a todas las rutas (incluyendo OPTIONS)
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));  // Manejo explícito de preflight
 
 // 2. Parseo de JSON (IMPORTANTE: ANTES de las rutas)
 app.use(express.json());
