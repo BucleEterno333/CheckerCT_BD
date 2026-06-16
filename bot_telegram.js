@@ -909,29 +909,23 @@ bot.onText(/\/gencukilento/, async (msg) => {
 });
 
 
-
 bot.onText(/\/estatusCuki/, async (msg) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
 
-    // Verificar si el usuario es admin (por su rol en la BD)
     const role = await getUserRoleByTelegramId(telegramId);
     if (role !== 'admin') {
-        return await sendSafeMessage(chatId, '❌ No tienes permiso para usar este comando. Solo administradores.');
+        return sendSafeMessage(chatId, '❌ No tienes permiso. Solo administradores.');
     }
 
     try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 10000);
         const response = await fetch(`${INTERNAL_API_URL}/admin/bot/toggle-service`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${BOT_API_KEY}`
-            },
-            signal: controller.signal
+                'x-bot-key': BOT_API_KEY   // ✅ Usa x-bot-key
+            }
         });
-        clearTimeout(timeoutId);
         const data = await response.json();
         if (data.success) {
             const status = data.enabled ? '✅ ACTIVADO' : '❌ DESACTIVADO';
