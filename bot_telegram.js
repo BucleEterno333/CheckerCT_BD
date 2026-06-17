@@ -58,8 +58,32 @@ const bankBins = {
 
 
 
+
 // ========== FUNCIONES AUXILIARES ==========
 
+
+
+// Función para construir el texto del mensaje de progreso
+function buildProgressMessage(resultados, total, tarjetaActual = null) {
+    // Usar un solo separador fijo (el primero de la lista)
+    const separador = SEPARATORS[0];  // o puedes usar '━━━━━━━━━━━━━━━━━━━' fijo
+        
+    let text = `📊 *Resultados de chequeo*\n🔍 Progreso: ${resultados.length}/${total}\n`;
+        
+    for (const r of resultados) {
+        text += `${separador}\n`;
+        text += `• Card: \`${r.card}\`\n`;
+        text += `• Status: ${r.status}\n`;
+    }
+        
+    if (tarjetaActual) {
+        text += `${separador}\n`;
+        text += `• Card: \`${tarjetaActual}\`\n`;
+        text += `• Status: Verificando 🔍\n`;
+    }
+        
+    return text
+}
 
 
 
@@ -436,31 +460,10 @@ async function verificarTarjetasConProgreso(chatId, telegramId, cookie, tarjetas
         if (userRes.rows.length > 0) username = userRes.rows[0].username;
     }
 
-    // Función para construir el texto del mensaje de progreso
-    // ========== CONSTRUIR MENSAJE DE PROGRESO (con separador fijo) ==========
-    function buildProgressMessage(resultados, total, tarjetaActual = null) {
-        // Usar un solo separador fijo (el primero de la lista)
-        const separador = SEPARATORS[0];  // o puedes usar '━━━━━━━━━━━━━━━━━━━' fijo
-        
-        let text = `📊 *Resultados de chequeo*\n🔍 Progreso: ${resultados.length}/${total}\n`;
-        
-        for (const r of resultados) {
-            text += `${separador}\n`;
-            text += `• Card: \`${r.card}\`\n`;
-            text += `• Status: ${r.status}\n`;
-        }
-        
-        if (tarjetaActual) {
-            text += `${separador}\n`;
-            text += `• Card: \`${tarjetaActual}\`\n`;
-            text += `• Status: Verificando 🔍\n`;
-        }
-        
-        return text;
-    }
+
 
     // Enviar mensaje inicial
-    const initialText = buildProgressMessage(0);
+    const initialText = buildProgressMessage([], total, tarjetas[0]);
     progressMsg = await sendSafeMessage(chatId, initialText, { parse_mode: 'Markdown' });
     if (!progressMsg) return; // Si falla el envío, salir
 
@@ -468,7 +471,7 @@ async function verificarTarjetasConProgreso(chatId, telegramId, cookie, tarjetas
     for (let i = 0; i < total; i++) {
         const card = tarjetas[i];
         // Actualizar mensaje mostrando la tarjeta actual como "Verificando"
-        const currentText = buildProgressMessage(i);
+        const currentText = buildProgressMessage(resultados, total, tarjetas[i]);
         try {
             await bot.editMessageText(currentText, {
                 chat_id: chatId,
@@ -487,7 +490,7 @@ async function verificarTarjetasConProgreso(chatId, telegramId, cookie, tarjetas
                 card: card,
                 status: `⛔ Error (cookie expirada)`
             });
-            const finalText = buildProgressMessage(i + 1);
+            const finalText = buildProgressMessage(resultados, total, tarjetas[i + 1] || null);
             try {
                 await bot.editMessageText(finalText, {
                     chat_id: chatId,
@@ -539,7 +542,7 @@ async function verificarTarjetasConProgreso(chatId, telegramId, cookie, tarjetas
         });
 
         // Editar mensaje con el resultado actualizado
-        const updatedText = buildProgressMessage(i + 1);
+        const updatedText = buildProgressMessage(resultados, total, tarjetas[i + 1] || null);
         try {
             await bot.editMessageText(updatedText, {
                 chat_id: chatId,
@@ -1598,35 +1601,55 @@ bot.onText(/^[\/\.](?:amazoncookieinfinita|amzckin|amazoninfinita)(?:\s+([\s\S]+
     };
 
     try {
-        // Obtener tarjetas
         let tarjetas = [];
         let cantidad = null;
         let extra = null;
 
+        // 1. Detectar lista de tarjetas (varias líneas)
         const lineas = fullParam.split(/\r?\n/);
         for (const linea of lineas) {
             const matchCard = linea.match(/(\d{16})\s*[|]\s*(\d{2})\s*[|]\s*(\d{4})\s*[|]\s*(\d{3,4})/);
             if (matchCard) tarjetas.push(`${matchCard[1]}|${matchCard[2]}|${matchCard[3]}|${matchCard[4]}`);
         }
 
+        // 2. Si no son tarjetas, detectar BIN, banco o extra
         if (tarjetas.length === 0 && fullParam) {
             let input = fullParam;
+            // Extraer cantidad opcional al final
             const matchCant = input.match(/\s+(\d+)$/);
             if (matchCant) {
                 cantidad = parseInt(matchCant[1]);
                 input = input.substring(0, matchCant.index).trim();
             }
-            extra = normalizarExtra(input);
-            const test = generarTarjetasDesdePatron(extra, 1);
-            if (!test || test.length === 0) throw new Error('Formato inválido');
             if (!cantidad) cantidad = 100;
-            if (cantidad > 100) cantidad = 100;
+            if (cantidad > 500) cantidad = 500;
+
+            // Detectar BIN (6 dígitos)
+            const esBin = /^\d{6}$/.test(input);
+            // Detectar banco (usando bankBins)
+            const esBanco = !esBin && getBinForBank?.(input) !== null;
+
+            if (esBin || esBanco) {
+                const bin = esBin ? input : getBinForBank(input);
+                await sendSafeMessage(chatId, `🔍 Extrapolando BIN ${bin}...`);
+                const extrasList = await getPatternsFromBin(chatId, bin);
+                if (!extrasList.length) throw new Error('No se encontraron patrones para ese BIN');
+                extra = extrasList[0]; // Usa el más frecuente
+                await sendSafeMessage(chatId, `✅ Extra elegido: \`${extra}\``);
+            } else {
+                // Tratar como extra (con X)
+                extra = normalizarExtra(input);
+                const test = generarTarjetasDesdePatron(extra, 1);
+                if (!test || test.length === 0) throw new Error('Formato inválido');
+            }
+
+            // Generar tarjetas desde el extra
             tarjetas = generarTarjetasDesdePatron(extra, cantidad);
         }
 
         if (tarjetas.length === 0) {
             setUserState(telegramId, { step: 'awaiting_amazoninfinita_param' });
-            return sendSafeMessage(chatId, '📌 Envía un extra, BIN, banco o lista de tarjetas.\nEj: 481515432624xxxx|09|2029|rnd 100');
+            return sendSafeMessage(chatId, '📌 Envía un Banco, BIN, Extra o lista de tarjetas, y la cantidad de ccs a checar.\nEj: 481515432624xxxx|09|2029|rnd 100');
         }
 
         // Mostrar la lista de tarjetas generadas (primeras 20)
