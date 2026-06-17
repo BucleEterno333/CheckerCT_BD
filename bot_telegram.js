@@ -777,7 +777,7 @@ function clearUserState(telegramId) {
 
 // ========== FUNCIONES PARA COMANDOS ==========
 async function handleGenCookieCommand(chatId, telegramId, country) {
-    if (!await checkAndKickIfNoDaysOrCredits(telegramId, chatId, 4)) return;
+    if (!await checkAndKickIfNoDaysOrCredits(telegramId, chatId, 0)) return;
     const paises = ['MX','US','CA','UK','DE','FR','IT','ES','JP','AU','IN'];
     if (!paises.includes(country)) { await sendSafeMessage(chatId, '❌ País inválido.'); return; }
     await sendSafeMessage(chatId, `🔄 Generando cookie para ${country}...`);
@@ -1603,29 +1603,30 @@ bot.onText(/^[\/\.](?:amazon\b|amz\b)(?:\s+(.+))?/i, async (msg, match) => {
 });
 
 // ========== COMANDO /amazoncookie (genera cookie nueva) ==========
+// ========== COMANDO /amazoncookie (genera cookie nueva) ==========
 bot.onText(/^[\/\.](?:amazoncookie|amazoncuki|amazonck|amzck)(?:\s+([\s\S]+))?/i, async (msg, match) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
     let param = match[1] ? match[1].trim() : '';
-    
-    // Si no hay parámetro, revisar reply
+
+    // Si no hay parámetro y hay reply, usar el texto del reply
     if (!param && msg.reply_to_message?.text) {
         param = msg.reply_to_message.text.trim();
     }
-    
+
     clearUserState(telegramId);
-    
+
+    // ========== CASO 1: Sin parámetros (modo interactivo) ==========
     if (!param) {
-        // Modo sin parámetros: generar cookie y luego esperar tarjetas
         await sendSafeMessage(chatId, '🍪 Generando nueva cookie...');
         try {
             const globalForcePlaywright = await getGlobalForcePlaywright();
             const requestBody = { country: 'MX', add_address: true };
             if (globalForcePlaywright) requestBody.force_playwright = true;
-            const response = await fetch(`${API_GENCOOKIE_URL}/generate`, { 
-                method: 'POST', 
-                headers: { 'Content-Type': 'application/json' }, 
-                body: JSON.stringify(requestBody) 
+            const response = await fetch(`${API_GENCOOKIE_URL}/generate`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(requestBody)
             });
             const data = await response.json();
             if (!data.success) throw new Error('Error al generar cookie');
@@ -1635,53 +1636,33 @@ bot.onText(/^[\/\.](?:amazoncookie|amazoncuki|amazonck|amzck)(?:\s+([\s\S]+))?/i
             await sendSafeMessage(chatId, `✅ Cookie generada. Créditos restantes: ${creditResult?.newCredits || '?'}.`);
             setUserState(telegramId, { step: 'awaiting_amazon_cards' });
             await sendSafeMessage(chatId, '💳 Envía las tarjetas (una por línea o con separadores):');
-        } catch (err) { 
-            await sendSafeMessage(chatId, `❌ Error: ${err.message}`); 
+        } catch (err) {
+            await sendSafeMessage(chatId, `❌ Error: ${err.message}`);
         }
         return;
     }
-    
-    // Limpiar tarjetas (ahora con múltiples líneas)
-    tarjetas = limpiarTarjetas(param);
+
+    // ========== CASO 2: Con parámetros ==========
+    // Limpiar tarjetas (soporta múltiples líneas)
+    let tarjetas = limpiarTarjetas(param);
     let esBin = /^\d{6}$/.test(param.trim());
     let esBanco = !esBin && getBinForBank?.(param.trim()) !== null;
-    
+
+    // Si hay tarjetas, verificarlas
     if (tarjetas.length > 0) {
-        if (tarjetas.length > 20) return sendSafeMessage(chatId, `⚠️ Máximo 20 tarjetas.`);
+        if (tarjetas.length > 20) {
+            return sendSafeMessage(chatId, `⚠️ Máximo 20 tarjetas.`);
+        }
         await sendSafeMessage(chatId, `💳 *Tarjetas a verificar (${tarjetas.length}):*\n${tarjetas.map(t => `\`${t}\``).join('\n')}`, { parse_mode: 'Markdown' });
         await sendSafeMessage(chatId, '🍪 Generando cookie para verificación...');
         try {
             const globalForcePlaywright = await getGlobalForcePlaywright();
             const requestBody = { country: 'MX', add_address: true };
             if (globalForcePlaywright) requestBody.force_playwright = true;
-            const response = await fetch(`${API_GENCOOKIE_URL}/generate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(requestBody) });
-            const data = await response.json();
-            if (!data.success) throw new Error('Error al generar cookie');
-            const cookie = data.data.cookie_string;
-            await updateUserCookie(telegramId, cookie);
-            const creditResult = await deductCredits(telegramId, 4);
-            await sendSafeMessage(chatId, `✅ Cookie generada. Créditos restantes: ${creditResult?.newCredits || '?'}.`);
-            await verificarTarjetasConCookie(chatId, telegramId, cookie, tarjetas, null);
-        } catch (err) { 
-            await sendSafeMessage(chatId, `❌ Error al generar cookie: ${err.message}`); 
-        }
-        return;
-    }
-    
-
-    clearUserState(telegramId);
-    
-    if (!param) {
-        // Modo sin parámetros: generar cookie y luego esperar tarjetas
-        await sendSafeMessage(chatId, '🍪 Generando nueva cookie...');
-        try {
-            const globalForcePlaywright = await getGlobalForcePlaywright();
-            const requestBody = { country: 'MX', add_address: true };
-            if (globalForcePlaywright) requestBody.force_playwright = true;
-            const response = await fetch(`${API_GENCOOKIE_URL}/generate`, { 
-                method: 'POST', 
-                headers: { 'Content-Type': 'application/json' }, 
-                body: JSON.stringify(requestBody) 
+            const response = await fetch(`${API_GENCOOKIE_URL}/generate`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(requestBody)
             });
             const data = await response.json();
             if (!data.success) throw new Error('Error al generar cookie');
@@ -1689,87 +1670,14 @@ bot.onText(/^[\/\.](?:amazoncookie|amazoncuki|amazonck|amzck)(?:\s+([\s\S]+))?/i
             await updateUserCookie(telegramId, cookie);
             const creditResult = await deductCredits(telegramId, 4);
             await sendSafeMessage(chatId, `✅ Cookie generada. Créditos restantes: ${creditResult?.newCredits || '?'}.`);
-            setUserState(telegramId, { step: 'awaiting_amazon_cards' });
-            await sendSafeMessage(chatId, '💳 Envía las tarjetas (una por línea o con separadores):');
-        } catch (err) { 
-            await sendSafeMessage(chatId, `❌ Error: ${err.message}`); 
-        }
-        return;
-    }
-    
-    // Limpiar tarjetas (ahora con múltiples líneas)
-    tarjetas = limpiarTarjetas(param);
-    let esBin = /^\d{6}$/.test(param.trim());
-    let esBanco = !esBin && getBinForBank?.(param.trim()) !== null;
-    
-    if (tarjetas.length > 0) {
-        if (tarjetas.length > 20) return sendSafeMessage(chatId, `⚠️ Máximo 20 tarjetas.`);
-        await sendSafeMessage(chatId, `💳 *Tarjetas a verificar (${tarjetas.length}):*\n${tarjetas.map(t => `\`${t}\``).join('\n')}`, { parse_mode: 'Markdown' });
-        await sendSafeMessage(chatId, '🍪 Generando cookie para verificación...');
-        try {
-            const globalForcePlaywright = await getGlobalForcePlaywright();
-            const requestBody = { country: 'MX', add_address: true };
-            if (globalForcePlaywright) requestBody.force_playwright = true;
-            const response = await fetch(`${API_GENCOOKIE_URL}/generate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(requestBody) });
-            const data = await response.json();
-            if (!data.success) throw new Error('Error al generar cookie');
-            const cookie = data.data.cookie_string;
-            await updateUserCookie(telegramId, cookie);
-            const creditResult = await deductCredits(telegramId, 4);
-            await sendSafeMessage(chatId, `✅ Cookie generada. Créditos restantes: ${creditResult?.newCredits || '?'}.`);
             await verificarTarjetasConCookie(chatId, telegramId, cookie, tarjetas, null);
-        } catch (err) { 
-            await sendSafeMessage(chatId, `❌ Error al generar cookie: ${err.message}`); 
+        } catch (err) {
+            await sendSafeMessage(chatId, `❌ Error al generar cookie: ${err.message}`);
         }
         return;
     }
-    
-    // Si no son tarjetas, procesar como BIN o extra (el resto del código)
-    // ... (mantén el resto de la lógica igual)
 
-    if (param) param = param.trim();
-    if (param === '') param = null;
-    clearUserState(telegramId);
-    if (!param) {
-        await sendSafeMessage(chatId, '🍪 Generando nueva cookie...');
-        try {
-            const globalForcePlaywright = await getGlobalForcePlaywright();
-            const requestBody = { country: 'MX', add_address: true };
-            if (globalForcePlaywright) requestBody.force_playwright = true;
-            const response = await fetch(`${API_GENCOOKIE_URL}/generate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(requestBody) });
-            const data = await response.json();
-            if (!data.success) throw new Error('Error al generar cookie');
-            const cookie = data.data.cookie_string;
-            await updateUserCookie(telegramId, cookie);
-            const creditResult = await deductCredits(telegramId, 4);
-            await sendSafeMessage(chatId, `✅ Cookie generada. Créditos restantes: ${creditResult?.newCredits || '?'}.`);
-            setUserState(telegramId, { step: 'awaiting_amazon_cards' });
-            await sendSafeMessage(chatId, '💳 Envía las tarjetas (una por línea o con separadores):');
-        } catch (err) { await sendSafeMessage(chatId, `❌ Error: ${err.message}`); }
-        return;
-    }
-    tarjetas = limpiarTarjetas(param);
-    let esBin = /^\d{6}$/.test(param);
-    let esBanco = !esBin && getBinForBank?.(param) !== null;
-    if (tarjetas.length > 0) {
-        if (tarjetas.length > 20) return sendSafeMessage(chatId, `⚠️ Máximo 20 tarjetas.`);
-        await sendSafeMessage(chatId, `💳 *Tarjetas a verificar (${tarjetas.length}):*\n${tarjetas.map(t => `\`${t}\``).join('\n')}`, { parse_mode: 'Markdown' });
-        await sendSafeMessage(chatId, '🍪 Generando cookie para verificación...');
-        try {
-            const globalForcePlaywright = await getGlobalForcePlaywright();
-            const requestBody = { country: 'MX', add_address: true };
-            if (globalForcePlaywright) requestBody.force_playwright = true;
-            const response = await fetch(`${API_GENCOOKIE_URL}/generate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(requestBody) });
-            const data = await response.json();
-            if (!data.success) throw new Error('Error al generar cookie');
-            const cookie = data.data.cookie_string;
-            await updateUserCookie(telegramId, cookie);
-            const creditResult = await deductCredits(telegramId, 4);
-            await sendSafeMessage(chatId, `✅ Cookie generada. Créditos restantes: ${creditResult?.newCredits || '?'}.`);
-            await verificarTarjetasConCookie(chatId, telegramId, cookie, tarjetas, null);
-        } catch (err) { await sendSafeMessage(chatId, `❌ Error al generar cookie: ${err.message}`); }
-        return;
-    }
+    // ========== CASO 3: Es BIN o banco ==========
     if (esBin || esBanco) {
         await sendSafeMessage(chatId, '🔄 Procesando en paralelo: generando cookie y extrapolando...');
         let cookie = null, extrapolation = null, cookieError = null, extrapolationError = null;
@@ -1780,29 +1688,43 @@ bot.onText(/^[\/\.](?:amazoncookie|amazoncuki|amazonck|amzck)(?:\s+([\s\S]+))?/i
                         const globalForcePlaywright = await getGlobalForcePlaywright();
                         const requestBody = { country: 'MX', add_address: true };
                         if (globalForcePlaywright) requestBody.force_playwright = true;
-                        const response = await fetch(`${API_GENCOOKIE_URL}/generate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(requestBody) });
+                        const response = await fetch(`${API_GENCOOKIE_URL}/generate`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(requestBody)
+                        });
                         const data = await response.json();
                         if (!data.success) throw new Error('Error al generar cookie');
                         await updateUserCookie(telegramId, data.data.cookie_string);
                         const creditResult = await deductCredits(telegramId, 4);
                         await sendSafeMessage(chatId, `✅ Cookie generada. Créditos restantes: ${creditResult?.newCredits || '?'}.`);
                         return data.data.cookie_string;
-                    } catch (err) { cookieError = err; return null; }
+                    } catch (err) {
+                        cookieError = err;
+                        return null;
+                    }
                 })(),
                 (async () => {
                     try {
                         const binParam = esBanco ? (getBinForBank?.(param) || param) : param;
                         return await prepararExtrapolacion(chatId, telegramId, binParam);
-                    } catch (err) { extrapolationError = err; return null; }
+                    } catch (err) {
+                        extrapolationError = err;
+                        return null;
+                    }
                 })()
             ]);
             if (cookieError) throw cookieError;
             if (extrapolationError) throw extrapolationError;
             if (!extrapolation || !extrapolation.tarjetas?.length) throw new Error('No se generaron tarjetas');
             await verificarTarjetasConCookie(chatId, telegramId, cookie, extrapolation.tarjetas, extrapolation.mensajePrevio);
-        } catch (err) { await sendSafeMessage(chatId, `❌ Error: ${err.message}`); }
+        } catch (err) {
+            await sendSafeMessage(chatId, `❌ Error: ${err.message}`);
+        }
         return;
     }
+
+    // ========== CASO 4: Es extra (con X) ==========
     try {
         const normalized = normalizarExtra(param);
         const test = generarTarjetasDesdePatron(normalized, 1);
@@ -1813,18 +1735,25 @@ bot.onText(/^[\/\.](?:amazoncookie|amazoncuki|amazonck|amzck)(?:\s+([\s\S]+))?/i
             const globalForcePlaywright = await getGlobalForcePlaywright();
             const requestBody = { country: 'MX', add_address: true };
             if (globalForcePlaywright) requestBody.force_playwright = true;
-            const response = await fetch(`${API_GENCOOKIE_URL}/generate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(requestBody) });
+            const response = await fetch(`${API_GENCOOKIE_URL}/generate`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(requestBody)
+            });
             const data = await response.json();
             if (!data.success) throw new Error('Error al generar cookie');
             const cookie = data.data.cookie_string;
             await updateUserCookie(telegramId, cookie);
             const creditResult = await deductCredits(telegramId, 4);
             await sendSafeMessage(chatId, `✅ Cookie generada. Créditos restantes: ${creditResult?.newCredits || '?'}.`);
-            await verificarTarjetasConCookie(chatId, cookie, tarjetasGen, null);
-        } else throw new Error('Formato no reconocido');
-    } catch (err) { await sendSafeMessage(chatId, `❌ Error: ${err.message}`); }
+            await verificarTarjetasConCookie(chatId, telegramId, cookie, tarjetasGen, null);
+        } else {
+            throw new Error('Formato no reconocido');
+        }
+    } catch (err) {
+        await sendSafeMessage(chatId, `❌ Error: ${err.message}`);
+    }
 });
-
 // ========== COMANDO /binlist ==========
 bot.onText(/^[\/\.](?:binlist|bins|list|binl|bnl)(?:\s+(.+))?/i, async (msg, match) => {
     const chatId = msg.chat.id;
