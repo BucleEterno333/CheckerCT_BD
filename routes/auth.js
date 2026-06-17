@@ -138,8 +138,10 @@ router.post('/login', trackActivity, async (req, res) => {
         }
 
         if (!user.is_active) return res.status(403).json({ success: false, error: 'Cuenta no verificada', requires_verification: true });
-        const validPassword = await bcrypt.compare(password, user.password_hash);
-        if (!validPassword) return res.status(401).json({ success: false, error: 'Credenciales incorrectas' });
+        const validPassword = user.password_hash ? await bcrypt.compare(password, user.password_hash) : false;
+        if (!validPassword) {
+            return res.status(401).json({ success: false, error: 'Credenciales incorrectas' });
+        }
         if (user.credits <= 0) return res.status(403).json({ success: false, error: 'No tienes créditos' });
 
     

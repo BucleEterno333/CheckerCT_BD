@@ -316,7 +316,8 @@ async function checkAndKickIfNoDaysOrCredits(telegramId, chatId, requiredCredits
     }
     const { credits, days_remaining } = user.rows[0];
     if (days_remaining <= 0) {
-        if (GROUP_CHAT_ID) await bot.telegram.kickChatMember(GROUP_CHAT_ID, telegramId).catch(() => {});
+        if (GROUP_CHAT_ID) await bot.kickChatMember(GROUP_CHAT_ID, telegramId).catch(() => {});
+
         await sendSafeMessage(chatId, '❌ Tus días han expirado.');
         return false;
     }
@@ -418,8 +419,33 @@ async function verificarTarjetasConCookie(chatId, telegramId, cookie, tarjetas, 
     await sendSafeMessage(chatId, resumen, { parse_mode: 'Markdown' });
 }
 
+// ========== FUNCIÓN BASE PARA VERIFICAR UNA TARJETA CON COOKIE ==========
+async function verificarTarjetaConCookie(card, cookie) {
+    try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 120000);
+        const resp = await fetch(API_AMAZON_CHECK_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ card, cookies: cookie }),
+            signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+        const data = await resp.json();
+        const isBanned = data.message && (
+            data.message.toLowerCase().includes('cookie expirada') ||
+            data.message.toLowerCase().includes('inicia sesión') ||
+            data.message.toLowerCase().includes('cuenta baneada') ||
+            data.message.toLowerCase().includes('account banned')
+        );
+        return { status: data.status, isBanned, message: data.message };
+    } catch (err) {
+        return { status: 'ERROR', isBanned: false, message: err.message };
+    }
+}
 
-    // Verifica una tarjeta con reintentos si el error es de Wallet
+
+// Verifica una tarjeta con reintentos si el error es de Wallet
 async function verificarTarjetaConReintentos(card, cookie, maxReintentos = 2) {
         let intentos = 0;
         while (intentos <= maxReintentos) {
@@ -847,30 +873,6 @@ async function procesarExtraConCantidad(chatId, telegramId, extra, cantidad) {
         return data.data.cookie_string;
     };
 
-    const verificarTarjetaConCookie = async (card, cookie) => {
-        try {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 120000);
-            const resp = await fetch(API_AMAZON_CHECK_URL, {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ card, cookies: cookie }), signal: controller.signal
-            });
-            clearTimeout(timeoutId);
-            const data = await resp.json();
-            const isBanned = data.message && (
-                data.message.toLowerCase().includes('cookie expirada') ||
-                data.message.toLowerCase().includes('inicia sesión') ||
-                data.message.toLowerCase().includes('cuenta baneada') ||
-                data.message.toLowerCase().includes('account banned')
-            );
-            return { status: data.status, isBanned, message: data.message };
-        } catch (err) {
-            return { status: 'ERROR', isBanned: false, message: err.message };
-        }
-    };
-
-
-
 
     let stats = { lives: 0, deads: 0, errors: 0, cookiesUsadas: 0 };
     let currentCookie = await generarCookieAsync();
@@ -887,7 +889,7 @@ async function procesarExtraConCantidad(chatId, telegramId, extra, cantidad) {
             await bot.editMessageText(`🛑 Proceso cancelado por cookie expirada`, { chat_id: chatId, message_id: progressMsg.message_id }).catch(() => {});
             break;
         }
-        
+    
         if (resultado.status === 'LIVE') {
             stats.lives++;
             try {
@@ -905,15 +907,15 @@ async function procesarExtraConCantidad(chatId, telegramId, extra, cantidad) {
                 }
             } catch (err) { console.error('Error guardando live:', err.message); }
         }
-        else if (res.status === 'DEAD') stats.deads++;
+        else if (resultado.status === 'DEAD') stats.deads++;
         else stats.errors++;
-        if (res.isBanned) {
+        if (resultado.isBanned) {
             if (nextCookiePromise) currentCookie = await nextCookiePromise;
             else currentCookie = await generarCookieAsync();
             nextCookiePromise = generarCookieAsync().catch(err => { console.error(err); return null; });
             stats.cookiesUsadas++;
         }
-        if ((i+1) % 10 === 0 || res.isBanned) {
+        if ((i+1) % 10 === 0 || resultado.isBanned) {
             try {
                 await bot.editMessageText(`🔄 ${i+1}/${total}\n💚 ${stats.lives} ❌ ${stats.deads} ⚠️ ${stats.errors}\n🍪 ${stats.cookiesUsadas}`, { chat_id: chatId, message_id: progressMsg.message_id });
             } catch(e) {}
