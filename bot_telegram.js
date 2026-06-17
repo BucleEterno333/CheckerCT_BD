@@ -760,33 +760,40 @@ async function handleExtrapoladorCommand(chatId, telegramId, input) {
 async function handleGenCommand(chatId, telegramId, fullParam, replyText = null) {
     if (!await checkAndKickIfNoDaysOrCredits(telegramId, chatId, 0)) return;
     let cantidad = 14;
-
     let input = fullParam;
-    // Si el parámetro está vacío y hay un reply, usar el reply
-    if (!input && replyText) {
-        input = replyText;
+
+    // Si el parámetro es solo un número, usarlo como cantidad y tomar el patrón del reply
+    if (/^\d+$/.test(input) && replyText) {
+        cantidad = parseInt(input);
+        if (cantidad > 50) cantidad = 50;
+        input = replyText.trim();
+    } else if (!input && replyText) {
+        // Si no hay parámetro pero hay reply, usar el reply
+        input = replyText.trim();
     }
 
-    // Separar cantidad y patrón
+    // Si input está vacío, pedir interactivo
+    if (!input) {
+        setUserState(telegramId, { step: 'awaiting_gen_param' });
+        return sendSafeMessage(chatId, '🎴 Envía un extra, BIN o nombre de banco (o responde a un mensaje con el patrón):');
+    }
+
+    // Extraer cantidad opcional del input si no se especificó antes
     const cantMatch = input.match(/\s+(\d+)$/);
-    if (cantMatch) {
+    if (cantMatch && !/^\d+$/.test(fullParam)) {
         cantidad = parseInt(cantMatch[1]);
         if (cantidad > 50) cantidad = 50;
         input = input.substring(0, cantMatch.index).trim();
     }
 
-    // Si input está vacío, usar el estado o reply
-    if (!input) {
-        return sendSafeMessage(chatId, '❌ No se detectó ningún patrón. Ejemplo: /gen 481515xxxx|09|2029|rnd 20');
+    // Si input tiene saltos de línea, combinarlos (por si pegaron varias líneas)
+    if (input.includes('\n')) {
+        input = input.replace(/\n/g, '|').replace(/\s+/g, '');
     }
 
     const tieneX = /[Xx]/.test(input);
     const tieneFecha = /\d{1,2}[\/\-|]\d{2,4}/.test(input);
     const partes = input.split('|');
-    // Si el input tiene saltos de línea, combinarlos
-    if (input.includes('\n')) {
-        input = input.replace(/\n/g, '|').replace(/\s+/g, '');
-    }
     const esExtra = (tieneX && tieneFecha) || (partes.length >= 3 && !/^\d{6}$/.test(input.trim()));
     const esBin = /^\d{6}$/.test(input.trim());
     const esBanco = !esExtra && !esBin && (() => { for (const key of Object.keys(bankBins)) if (input.toLowerCase().includes(key)) return true; return false; })();
@@ -802,9 +809,12 @@ async function handleGenCommand(chatId, telegramId, fullParam, replyText = null)
                 normalized = `${numBase}|${mes}|${año}|${cvv}`;
             }
             const tarjetas = generarTarjetasDesdePatron(normalized, cantidad);
-            const lista = tarjetas.slice(0,20).map(t => `\`${t}\``).join('\n');
-            const resto = tarjetas.length > 20 ? `\n... y ${tarjetas.length-20} más` : '';
-            await sendSafeMessage(chatId, `🎴 *Tarjetas generadas (${tarjetas.length}):*\n${lista}${resto}`, { parse_mode: 'Markdown' });
+            let lista = tarjetas.map(t => `\`${t}\``).join('\n');
+            if (lista.length > 100) {
+                lista = tarjetas.slice(0, 100).map(t => `\`${t}\``).join('\n');
+                lista += `\n... y ${tarjetas.length - 100} más`;
+            }
+            await sendSafeMessage(chatId, `🎴 *Tarjetas generadas (${tarjetas.length}):*\n${lista}`, { parse_mode: 'Markdown' });
         } else if (esBin) {
             await sendSafeMessage(chatId, `🔮 Extrapolando BIN ${input}...`);
             const response = await fetch(`${API_EXTRAPOLADOR_URL}/api/search-bin`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ bin: input }) });
@@ -850,7 +860,6 @@ async function handleGenCommand(chatId, telegramId, fullParam, replyText = null)
         }
     } catch (error) { await sendSafeMessage(chatId, `❌ Error: ${error.message}`); }
 }
-
 async function handleLimpiadorCommand(chatId, telegramId, texto) {
     const tarjetas = limpiarTarjetas(texto);
     if (tarjetas.length === 0) return sendSafeMessage(chatId, '❌ No se encontraron tarjetas.');
