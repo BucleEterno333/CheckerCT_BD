@@ -765,21 +765,33 @@ async function handleGenCommand(chatId, telegramId, fullParam) {
     if (cantMatch) {
         cantidad = parseInt(cantMatch[1]);
         if (cantidad > 50) cantidad = 50;
-        input = input.substring(0, cantMatch.index);
+        input = input.substring(0, cantMatch.index).trim();
     }
+    // Si input está vacío, intentar obtener del estado o de mensaje anterior
+    if (!input) {
+        // Si hay un mensaje anterior, podríamos obtenerlo (simple: buscamos en el reply)
+        return sendSafeMessage(chatId, '❌ No se detectó ningún patrón. Ejemplo: /gen 481515xxxx|09|2029|rnd 20');
+    }
+
     const tieneX = /[Xx]/.test(input);
     const tieneFecha = /\d{1,2}[\/\-|]\d{2,4}/.test(input);
-    const esExtra = tieneX && tieneFecha && (tieneX || input.trim().split('|')[0].length < 16);
+    const partes = input.split('|');
+    // Si el input tiene saltos de línea, combinarlos
+    if (input.includes('\n')) {
+        input = input.replace(/\n/g, '|').replace(/\s+/g, '');
+    }
+    const esExtra = (tieneX && tieneFecha) || (partes.length >= 3 && !/^\d{6}$/.test(input.trim()));
     const esBin = /^\d{6}$/.test(input.trim());
     const esBanco = !esExtra && !esBin && (() => { for (const key of Object.keys(bankBins)) if (input.toLowerCase().includes(key)) return true; return false; })();
+
     try {
         if (esExtra) {
             let normalized = input.trim().replace(/[ /-]+/g, '|').replace(/\|+/g, '|');
-            const partes = normalized.split('|');
-            if (partes.length >= 3) {
-                let [numBase, mes, año, cvv] = partes;
+            const partes2 = normalized.split('|');
+            if (partes2.length >= 3) {
+                let [numBase, mes, año, cvv] = partes2;
                 if (año.length === 2) año = '20' + año;
-                if (!cvv) cvv = 'rnd';
+                if (!cvv || cvv.toLowerCase() === 'rnd') cvv = 'rnd';
                 normalized = `${numBase}|${mes}|${año}|${cvv}`;
             }
             const tarjetas = generarTarjetasDesdePatron(normalized, cantidad);
@@ -793,12 +805,12 @@ async function handleGenCommand(chatId, telegramId, fullParam) {
             if (!data.success || !data.data || !data.data.length) throw new Error('No se encontraron tarjetas');
             const patrones = {};
             for (const tarjeta of data.data) {
-                const partes = tarjeta.split('|');
-                if (partes.length < 3) continue;
-                const num = partes[0];
+                const partes3 = tarjeta.split('|');
+                if (partes3.length < 3) continue;
+                const num = partes3[0];
                 if (num.length !== 16) continue;
                 const pref = num.slice(0,12);
-                const clave = `${pref}xxxx|${partes[1]}|${partes[2]}`;
+                const clave = `${pref}xxxx|${partes3[1]}|${partes3[2]}`;
                 patrones[clave] = (patrones[clave] || 0) + 1;
             }
             const items = Object.entries(patrones).map(([p,c]) => ({ patron: p, count: c }));
@@ -817,9 +829,6 @@ async function handleGenCommand(chatId, telegramId, fullParam) {
             const lista = tarjetas.slice(0,20).map(t => `\`${t}\``).join('\n');
             const resto = tarjetas.length > 20 ? `\n... y ${tarjetas.length-20} más` : '';
             await sendSafeMessage(chatId, `🎴 *Tarjetas generadas (${tarjetas.length}):*\n${lista}${resto}`, { parse_mode: 'Markdown' });
-            const creditResult = await deductCredits(telegramId, 10);
-            if (creditResult?.creditsZero) await kickUserFromGroup(telegramId);
-            return;
         } else if (esBanco) {
             let binElegido = null;
             for (const [key, bins] of Object.entries(bankBins)) {
@@ -854,10 +863,17 @@ async function handleAmazonCommand(chatId, telegramId, param) {
     }
     tarjetas = limpiarTarjetas(param);
     if (tarjetas.length > 0) {
+        if (tarjetas.length > 20) return sendSafeMessage(chatId, '⚠️ Máximo 20 tarjetas.');
         await verificarTarjetasConProgreso(chatId, telegramId, cookie, tarjetas, null);
         return;
     }
-    let normalizedParam = normalizarExtra(param);
+
+    // Si no hay tarjetas y el parámetro tiene saltos de línea, combinarlos
+    let inputParaNormalizar = param;
+    if (tarjetas.length === 0 && param.includes('\n')) {
+        inputParaNormalizar = param.replace(/\n/g, '|').replace(/\s+/g, '');
+    }
+    let normalizedParam = normalizarExtra(inputParaNormalizar);
     const tienePipe = normalizedParam.includes('|');
     const tieneFecha = /\d{1,2}[\/\-|]\d{2,4}/.test(normalizedParam);
     const esExtra = tienePipe && tieneFecha;
@@ -2026,7 +2042,6 @@ bot.onText(/^[\/\.](?:amazoncookie|amazoncuki|amazonck|amzck)\b(?:\s+([\s\S]+))?
             const creditResult = await deductCredits(telegramId, 4);
             await pool.query('UPDATE users SET cookies_generated = cookies_generated + 1 WHERE telegram_id = $1', [telegramId]);
 
-            // Mensaje completo de cookie
             let msgText = `🍪 *Cookie ${country}*\n📞 Tel: \`${phone}\`\n🔑 Pass: \`${password}\`\n🍪 *Cookie string:*\n\`\`\`\n${cookie_string}\n\`\`\``;
             if (creditResult) msgText += `\n💰 Créditos restantes: ${creditResult.newCredits}`;
             if (creditResult?.creditsZero) await kickUserFromGroup(telegramId);
@@ -2050,12 +2065,15 @@ bot.onText(/^[\/\.](?:amazoncookie|amazoncuki|amazonck|amzck)\b(?:\s+([\s\S]+))?
         return;
     }
 
-    // ========== CASO 2: Con parámetros ==========
-    let tarjetas = limpiarTarjetas(param);
-    let esBin = /^\d{6}$/.test(param.trim());
-    let esBanco = !esBin && getBinForBank?.(param.trim()) !== null;
+    // ========== LIMPIAR SALTOS DE LÍNEA ==========
+    let inputLimpio = param;
+    // Si hay saltos de línea y no parece una lista de tarjetas (ya que tarjetas está vacío), unir con '|'
+    if (param.includes('\n')) {
+        inputLimpio = param.replace(/\n/g, '|').replace(/\s+/g, '');
+    }
 
-    // Si hay tarjetas, generar cookie, mostrar detalles y verificar
+    // ========== CASO 2: Detectar tarjetas ==========
+    let tarjetas = limpiarTarjetas(param);
     if (tarjetas.length > 0) {
         if (tarjetas.length > 20) {
             return sendSafeMessage(chatId, `⚠️ Máximo 20 tarjetas.`);
@@ -2069,7 +2087,10 @@ bot.onText(/^[\/\.](?:amazoncookie|amazoncuki|amazonck|amzck)\b(?:\s+([\s\S]+))?
         return;
     }
 
-    // ========== CASO 3: Es BIN o banco ==========
+    // ========== CASO 3: Es BIN o banco (usando inputLimpio) ==========
+    const esBin = /^\d{6}$/.test(inputLimpio);
+    const esBanco = !esBin && getBinForBank?.(inputLimpio) !== null;
+
     if (esBin || esBanco) {
         await sendSafeMessage(chatId, '🔄 Procesando en paralelo: generando cookie y extrapolando...');
         let cookieResult = null;
@@ -2089,7 +2110,7 @@ bot.onText(/^[\/\.](?:amazoncookie|amazoncuki|amazonck|amzck)\b(?:\s+([\s\S]+))?
                 })(),
                 (async () => {
                     try {
-                        const binParam = esBanco ? (getBinForBank?.(param) || param) : param;
+                        const binParam = esBanco ? (getBinForBank?.(inputLimpio) || inputLimpio) : inputLimpio;
                         return await prepararExtrapolacion(chatId, telegramId, binParam);
                     } catch (err) {
                         extrapolationError = err;
@@ -2111,7 +2132,8 @@ bot.onText(/^[\/\.](?:amazoncookie|amazoncuki|amazonck|amzck)\b(?:\s+([\s\S]+))?
 
     // ========== CASO 4: Es extra (con X) ==========
     try {
-        const normalized = normalizarExtra(param);
+        // Usar inputLimpio para normalizar también
+        const normalized = normalizarExtra(inputLimpio);
         const test = generarTarjetasDesdePatron(normalized, 1);
         if (test?.length) {
             let tarjetasGen = generarTarjetasDesdePatron(normalized, 14);
