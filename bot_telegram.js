@@ -718,7 +718,7 @@ async function handleAmazonCommand(chatId, telegramId, param) {
         await sendSafeMessage(chatId, '🔑 No tienes cookie. Usa /gencookie primero.');
         return;
     }
-    let tarjetas = limpiarTarjetas(param);
+    tarjetas = limpiarTarjetas(param);
     if (tarjetas.length > 0) {
         if (tarjetas.length > 20) return sendSafeMessage(chatId, '⚠️ Máximo 20 tarjetas.');
 await verificarTarjetasConCookie(chatId, telegramId, cookie, tarjetas, null);
@@ -1642,7 +1642,7 @@ bot.onText(/^[\/\.](?:amazoncookie|amazoncuki|amazonck|amzck)(?:\s+([\s\S]+))?/i
     }
     
     // Limpiar tarjetas (ahora con múltiples líneas)
-    let tarjetas = limpiarTarjetas(param);
+    tarjetas = limpiarTarjetas(param);
     let esBin = /^\d{6}$/.test(param.trim());
     let esBanco = !esBin && getBinForBank?.(param.trim()) !== null;
     
@@ -1698,7 +1698,7 @@ bot.onText(/^[\/\.](?:amazoncookie|amazoncuki|amazonck|amzck)(?:\s+([\s\S]+))?/i
     }
     
     // Limpiar tarjetas (ahora con múltiples líneas)
-    let tarjetas = limpiarTarjetas(param);
+    tarjetas = limpiarTarjetas(param);
     let esBin = /^\d{6}$/.test(param.trim());
     let esBanco = !esBin && getBinForBank?.(param.trim()) !== null;
     
@@ -1748,7 +1748,7 @@ bot.onText(/^[\/\.](?:amazoncookie|amazoncuki|amazonck|amzck)(?:\s+([\s\S]+))?/i
         } catch (err) { await sendSafeMessage(chatId, `❌ Error: ${err.message}`); }
         return;
     }
-    let tarjetas = limpiarTarjetas(param);
+    tarjetas = limpiarTarjetas(param);
     let esBin = /^\d{6}$/.test(param);
     let esBanco = !esBin && getBinForBank?.(param) !== null;
     if (tarjetas.length > 0) {
