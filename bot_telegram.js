@@ -1589,11 +1589,17 @@ bot.onText(/^[\/\.]gracias$/i, async (msg) => {
 });
 
 // ========== COMANDO /amazon (usa cookie guardada) ==========
-bot.onText(/^[\/\.](?:amazon\b|amz\b)(?:\s+(.+))?/i, async (msg, match) => {
+// ========== COMANDO /amazon (usa cookie guardada) ==========
+bot.onText(/^[\/\.](?:amazon\b|amz\b)(?:\s+([\s\S]+))?/i, async (msg, match) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
-    let param = getCommandParam(msg, 'amazon') || getCommandParam(msg, 'amz');
-    if (!param && msg.reply_to_message?.text) param = msg.reply_to_message.text.trim();
+    let param = match[1] ? match[1].trim() : '';
+    
+    // Si no hay parámetro y hay reply, usar el texto del reply
+    if (!param && msg.reply_to_message?.text) {
+        param = msg.reply_to_message.text.trim();
+    }
+    
     if (!param) {
         setUserState(telegramId, { step: 'awaiting_amazon_cards' });
         return sendSafeMessage(chatId, '💳 Envía tarjetas, patrón, BIN o nombre de banco:');
