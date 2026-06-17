@@ -757,19 +757,26 @@ async function handleExtrapoladorCommand(chatId, telegramId, input) {
     } catch (error) { await sendSafeMessage(chatId, `❌ Error: ${error.message}`); }
 }
 
-async function handleGenCommand(chatId, telegramId, fullParam) {
+async function handleGenCommand(chatId, telegramId, fullParam, replyText = null) {
     if (!await checkAndKickIfNoDaysOrCredits(telegramId, chatId, 0)) return;
-    let cantidad = 10;
+    let cantidad = 14;
+
     let input = fullParam;
+    // Si el parámetro está vacío y hay un reply, usar el reply
+    if (!input && replyText) {
+        input = replyText;
+    }
+
+    // Separar cantidad y patrón
     const cantMatch = input.match(/\s+(\d+)$/);
     if (cantMatch) {
         cantidad = parseInt(cantMatch[1]);
         if (cantidad > 50) cantidad = 50;
         input = input.substring(0, cantMatch.index).trim();
     }
-    // Si input está vacío, intentar obtener del estado o de mensaje anterior
+
+    // Si input está vacío, usar el estado o reply
     if (!input) {
-        // Si hay un mensaje anterior, podríamos obtenerlo (simple: buscamos en el reply)
         return sendSafeMessage(chatId, '❌ No se detectó ningún patrón. Ejemplo: /gen 481515xxxx|09|2029|rnd 20');
     }
 
@@ -2183,13 +2190,12 @@ bot.onText(/^[\/\.](?:extrapolador|extrapolado|extrapolad|extrapolar|extrapola|e
 bot.onText(/^[\/\.](?:generadorccs|genccs|gncc|gen\b)(?:\s+(.+))?/i, async (msg, match) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
-    let param = match[1]?.trim();
-    if (!param && msg.reply_to_message?.text) param = msg.reply_to_message.text.trim();
-    if (!param) {
-        setUserState(telegramId, { step: 'awaiting_gen_param' });
-        return sendSafeMessage(chatId, '🎴 Envía un extra, BIN o nombre de banco:');
+    let param = match[1]?.trim() || '';
+    let replyText = null;
+    if (msg.reply_to_message?.text) {
+        replyText = msg.reply_to_message.text.trim();
     }
-    await handleGenCommand(chatId, telegramId, param);
+    await handleGenCommand(chatId, telegramId, param, replyText);
     clearUserState(telegramId);
 });
 
