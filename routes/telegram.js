@@ -198,7 +198,6 @@ router.post('/save-live', async (req, res) => {
     }
 });
 
-// Función auxiliar para formatear mensaje de Telegram
 function formatearMensajeTelegram(card, result) {
     const partes = card.split('|');
     const numero = partes[0];
@@ -210,22 +209,22 @@ function formatearMensajeTelegram(card, result) {
     const bin = numero.slice(0, 6);
     const ultimos4 = numero.slice(-4);
     
-    let mensaje = `🎯 *¡LIVE ENCONTRADA!* 🎯\n\n`;
-    mensaje += `💳 *Tarjeta:* \`${escapeMarkdown(numeroFormateado)}\`\n`;
-    mensaje += `📅 *Fecha:* ${escapeMarkdown(mes)}/${escapeMarkdown(año)}\n`;
-    mensaje += `🔐 *CVV:* ${escapeMarkdown(cvv)}\n`;
-    mensaje += `🔢 *BIN:* ${escapeMarkdown(bin)}\n`;
-    mensaje += `🔄 *Últimos 4:* ${escapeMarkdown(ultimos4)}\n\n`;
+    let mensaje = `🎯 <b>¡LIVE ENCONTRADA!</b> 🎯\n\n`;
+    mensaje += `💳 <b>Tarjeta:</b> <code>${numeroFormateado}</code>\n`;
+    mensaje += `📅 <b>Fecha:</b> ${mes}/${año}\n`;
+    mensaje += `🔐 <b>CVV:</b> ${cvv}\n`;
+    mensaje += `🔢 <b>BIN:</b> ${bin}\n`;
+    mensaje += `🔄 <b>Últimos 4:</b> ${ultimos4}\n\n`;
     
     if (result) {
-        mensaje += `📊 *Resultado:* ${escapeMarkdown(result.original_status || result.status || 'LIVE')}\n`;
+        mensaje += `📊 <b>Resultado:</b> ${result.original_status || result.status || 'LIVE'}\n`;
         if (result.message) {
-            mensaje += `📝 *Detalle:* ${escapeMarkdown(result.message)}\n`;
+            mensaje += `📝 <b>Detalle:</b> ${result.message}\n`;
         }
     }
     
-    mensaje += `\n⏰ *Hora:* ${escapeMarkdown(new Date().toLocaleString())}\n`;
-    mensaje += `🛒 *Gate:* Amazon CHK\n`;
+    mensaje += `\n⏰ <b>Hora:</b> ${new Date().toLocaleString()}\n`;
+    mensaje += `🛒 <b>Gate:</b> Amazon CHK\n`;
     mensaje += `\n━━━━━━━━━━━━━━━━━━━\n`;
     mensaje += `@AstralCHK_Bot`;
     

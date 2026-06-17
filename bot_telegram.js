@@ -114,9 +114,10 @@ async function sendSafeMessage(chatId, text, options = {}) {
 }
 
 // bot_telegram.js - agregar esta función
+// Reemplaza sendLiveToTelegram por:
 async function sendLiveToTelegram(chatId, message) {
     try {
-        await bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
+        await bot.sendMessage(chatId, message, { parse_mode: 'HTML' });
         return { success: true };
     } catch (error) {
         console.error(`❌ Error enviando live a ${chatId}:`, error.message);
@@ -416,6 +417,39 @@ async function verificarTarjetasConCookie(chatId, telegramId, cookie, tarjetas, 
     if (resumen.length > 4096) resumen = resumen.substring(0,4000) + '...';
     await sendSafeMessage(chatId, resumen, { parse_mode: 'Markdown' });
 }
+
+
+    // Verifica una tarjeta con reintentos si el error es de Wallet
+async function verificarTarjetaConReintentos(card, cookie, maxReintentos = 2) {
+        let intentos = 0;
+        while (intentos <= maxReintentos) {
+            const resultado = await verificarTarjetaConCookie(card, cookie);
+            const msgLower = (resultado.message || '').toLowerCase();
+            const esErrorWallet = msgLower.includes('no se pudo acceder a wallet') ||
+                                msgLower.includes('error al entrar a amazonwallet') ||
+                                msgLower.includes('fallo al obtener wallet') ||
+                                msgLower.includes('no se pudo agregar tarjeta');
+            
+            // Si es LIVE o DEAD, devolver inmediatamente
+            if (resultado.status === 'LIVE' || resultado.status === 'DEAD') {
+                return { ...resultado, intentos };
+            }
+            
+            // Si es error de wallet y no es el último intento, reintentar
+            if (esErrorWallet && intentos < maxReintentos) {
+                console.log(`🔄 Reintentando tarjeta (${intentos+1}/${maxReintentos}) por error de Wallet`);
+                await new Promise(r => setTimeout(r, 2000)); // espera 2s antes de reintentar
+                intentos++;
+                continue;
+            }
+            
+            // Si es otro error (incluyendo cookie expirada), devolver sin reintentar
+            return { ...resultado, intentos };
+        }
+        // Si se acabaron los reintentos
+        return { status: 'ERROR', message: 'Error de Wallet tras reintentos', isBanned: false, intentos };
+}
+
 
 // Función para obtener información de BIN desde binlist.net
 async function getBinInfo(bin) {
@@ -836,36 +870,6 @@ async function procesarExtraConCantidad(chatId, telegramId, extra, cantidad) {
     };
 
 
-    // Verifica una tarjeta con reintentos si el error es de Wallet
-    async function verificarTarjetaConReintentos(card, cookie, maxReintentos = 2) {
-        let intentos = 0;
-        while (intentos <= maxReintentos) {
-            const resultado = await verificarTarjetaConCookie(card, cookie);
-            const msgLower = (resultado.message || '').toLowerCase();
-            const esErrorWallet = msgLower.includes('no se pudo acceder a wallet') ||
-                                msgLower.includes('error al entrar a amazonwallet') ||
-                                msgLower.includes('fallo al obtener wallet') ||
-                                msgLower.includes('no se pudo agregar tarjeta');
-            
-            // Si es LIVE o DEAD, devolver inmediatamente
-            if (resultado.status === 'LIVE' || resultado.status === 'DEAD') {
-                return { ...resultado, intentos };
-            }
-            
-            // Si es error de wallet y no es el último intento, reintentar
-            if (esErrorWallet && intentos < maxReintentos) {
-                console.log(`🔄 Reintentando tarjeta (${intentos+1}/${maxReintentos}) por error de Wallet`);
-                await new Promise(r => setTimeout(r, 2000)); // espera 2s antes de reintentar
-                intentos++;
-                continue;
-            }
-            
-            // Si es otro error (incluyendo cookie expirada), devolver sin reintentar
-            return { ...resultado, intentos };
-        }
-        // Si se acabaron los reintentos
-        return { status: 'ERROR', message: 'Error de Wallet tras reintentos', isBanned: false, intentos };
-    }
 
 
     let stats = { lives: 0, deads: 0, errors: 0, cookiesUsadas: 0 };
