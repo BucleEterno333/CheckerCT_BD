@@ -134,28 +134,7 @@ async function notifyAdminsAndGroups(message, parseMode = 'Markdown') {
             } catch (err) { console.error('Error notificando admin:', err.message); }
         }
     }
-    // Notificar al grupo principal
-    const GROUP_CHAT_ID = process.env.GROUP_CHAT_ID;
-    if (GROUP_CHAT_ID) {
-        try {
-            await bot.sendMessage(GROUP_CHAT_ID, message, { parse_mode: parseMode });
-        } catch (err) {
-            console.error('Error notificando al grupo:', err.message);
-            if (err.message && err.message.includes('upgraded to a supergroup')) {
-                // Obtener el nuevo ID del grupo si es posible
-                try {
-                    const chat = await bot.getChat(GROUP_CHAT_ID);
-                    const newId = chat.id;
-                    const errorMsg = `⚠️ El grupo ha sido actualizado a supergrupo.\nAntiguo ID: ${GROUP_CHAT_ID}\nNuevo ID: ${newId}\nActualiza la variable GROUP_CHAT_ID en el entorno y reinicia el bot.`;
-                    for (const admin of adminsRes.rows) {
-                        if (admin.telegram_id) await bot.sendMessage(admin.telegram_id, errorMsg, { parse_mode: 'Markdown' }).catch(() => {});
-                    }
-                } catch (e) {
-                    console.error('No se pudo obtener el nuevo ID del grupo:', e.message);
-                }
-            }
-        }
-    }
+
 }
 
 
@@ -365,8 +344,6 @@ async function checkAndUpdateTelegramProfile(telegramId, userId, currentUsername
             VALUES ($1, $2, $3, $4, $5, NOW())`, [userId, saved.telegram_username, currentUsername, saved.display_name, currentFullName]);
         const userInfo = await pool.query('SELECT username FROM users WHERE id = $1', [userId]);
         const username = userInfo.rows[0]?.username || userId;
-        const message = `⚠️ *CAMBIO DE PERFIL DETECTADO* ⚠️\n\n👤 Usuario: ${username}\n🆔 ID: ${userId}\n📱 Telegram ID: ${telegramId}\n\n📛 Nombre: \`${saved.display_name}\` → \`${currentFullName}\`\n👥 Username: @${saved.telegram_username || ''} → @${currentUsername || ''}\n\n🕒 Detectado automáticamente.`;
-        await notifyAdminsAndGroups(message);
     }
     return changes;
 }
@@ -1626,11 +1603,130 @@ bot.onText(/^[\/\.](?:amazon\b|amz\b)(?:\s+(.+))?/i, async (msg, match) => {
 });
 
 // ========== COMANDO /amazoncookie (genera cookie nueva) ==========
-bot.onText(/^[\/\.](?:amazoncookie|amazoncuki|amazonck|amzck)/i, async (msg) => {
+bot.onText(/^[\/\.](?:amazoncookie|amazoncuki|amazonck|amzck)(?:\s+([\s\S]+))?/i, async (msg, match) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
-    let param = getCommandParam(msg, 'amazoncookie') || getCommandParam(msg, 'amazoncuki') || getCommandParam(msg, 'amazonck') || getCommandParam(msg, 'amzck');
-    if (!param && msg.reply_to_message?.text) param = msg.reply_to_message.text.trim();
+    let param = match[1] ? match[1].trim() : '';
+    
+    // Si no hay parámetro, revisar reply
+    if (!param && msg.reply_to_message?.text) {
+        param = msg.reply_to_message.text.trim();
+    }
+    
+    clearUserState(telegramId);
+    
+    if (!param) {
+        // Modo sin parámetros: generar cookie y luego esperar tarjetas
+        await sendSafeMessage(chatId, '🍪 Generando nueva cookie...');
+        try {
+            const globalForcePlaywright = await getGlobalForcePlaywright();
+            const requestBody = { country: 'MX', add_address: true };
+            if (globalForcePlaywright) requestBody.force_playwright = true;
+            const response = await fetch(`${API_GENCOOKIE_URL}/generate`, { 
+                method: 'POST', 
+                headers: { 'Content-Type': 'application/json' }, 
+                body: JSON.stringify(requestBody) 
+            });
+            const data = await response.json();
+            if (!data.success) throw new Error('Error al generar cookie');
+            const cookie = data.data.cookie_string;
+            await updateUserCookie(telegramId, cookie);
+            const creditResult = await deductCredits(telegramId, 4);
+            await sendSafeMessage(chatId, `✅ Cookie generada. Créditos restantes: ${creditResult?.newCredits || '?'}.`);
+            setUserState(telegramId, { step: 'awaiting_amazon_cards' });
+            await sendSafeMessage(chatId, '💳 Envía las tarjetas (una por línea o con separadores):');
+        } catch (err) { 
+            await sendSafeMessage(chatId, `❌ Error: ${err.message}`); 
+        }
+        return;
+    }
+    
+    // Limpiar tarjetas (ahora con múltiples líneas)
+    let tarjetas = limpiarTarjetas(param);
+    let esBin = /^\d{6}$/.test(param.trim());
+    let esBanco = !esBin && getBinForBank?.(param.trim()) !== null;
+    
+    if (tarjetas.length > 0) {
+        if (tarjetas.length > 20) return sendSafeMessage(chatId, `⚠️ Máximo 20 tarjetas.`);
+        await sendSafeMessage(chatId, `💳 *Tarjetas a verificar (${tarjetas.length}):*\n${tarjetas.map(t => `\`${t}\``).join('\n')}`, { parse_mode: 'Markdown' });
+        await sendSafeMessage(chatId, '🍪 Generando cookie para verificación...');
+        try {
+            const globalForcePlaywright = await getGlobalForcePlaywright();
+            const requestBody = { country: 'MX', add_address: true };
+            if (globalForcePlaywright) requestBody.force_playwright = true;
+            const response = await fetch(`${API_GENCOOKIE_URL}/generate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(requestBody) });
+            const data = await response.json();
+            if (!data.success) throw new Error('Error al generar cookie');
+            const cookie = data.data.cookie_string;
+            await updateUserCookie(telegramId, cookie);
+            const creditResult = await deductCredits(telegramId, 4);
+            await sendSafeMessage(chatId, `✅ Cookie generada. Créditos restantes: ${creditResult?.newCredits || '?'}.`);
+            await verificarTarjetasConCookie(chatId, telegramId, cookie, tarjetas, null);
+        } catch (err) { 
+            await sendSafeMessage(chatId, `❌ Error al generar cookie: ${err.message}`); 
+        }
+        return;
+    }
+    
+
+    clearUserState(telegramId);
+    
+    if (!param) {
+        // Modo sin parámetros: generar cookie y luego esperar tarjetas
+        await sendSafeMessage(chatId, '🍪 Generando nueva cookie...');
+        try {
+            const globalForcePlaywright = await getGlobalForcePlaywright();
+            const requestBody = { country: 'MX', add_address: true };
+            if (globalForcePlaywright) requestBody.force_playwright = true;
+            const response = await fetch(`${API_GENCOOKIE_URL}/generate`, { 
+                method: 'POST', 
+                headers: { 'Content-Type': 'application/json' }, 
+                body: JSON.stringify(requestBody) 
+            });
+            const data = await response.json();
+            if (!data.success) throw new Error('Error al generar cookie');
+            const cookie = data.data.cookie_string;
+            await updateUserCookie(telegramId, cookie);
+            const creditResult = await deductCredits(telegramId, 4);
+            await sendSafeMessage(chatId, `✅ Cookie generada. Créditos restantes: ${creditResult?.newCredits || '?'}.`);
+            setUserState(telegramId, { step: 'awaiting_amazon_cards' });
+            await sendSafeMessage(chatId, '💳 Envía las tarjetas (una por línea o con separadores):');
+        } catch (err) { 
+            await sendSafeMessage(chatId, `❌ Error: ${err.message}`); 
+        }
+        return;
+    }
+    
+    // Limpiar tarjetas (ahora con múltiples líneas)
+    let tarjetas = limpiarTarjetas(param);
+    let esBin = /^\d{6}$/.test(param.trim());
+    let esBanco = !esBin && getBinForBank?.(param.trim()) !== null;
+    
+    if (tarjetas.length > 0) {
+        if (tarjetas.length > 20) return sendSafeMessage(chatId, `⚠️ Máximo 20 tarjetas.`);
+        await sendSafeMessage(chatId, `💳 *Tarjetas a verificar (${tarjetas.length}):*\n${tarjetas.map(t => `\`${t}\``).join('\n')}`, { parse_mode: 'Markdown' });
+        await sendSafeMessage(chatId, '🍪 Generando cookie para verificación...');
+        try {
+            const globalForcePlaywright = await getGlobalForcePlaywright();
+            const requestBody = { country: 'MX', add_address: true };
+            if (globalForcePlaywright) requestBody.force_playwright = true;
+            const response = await fetch(`${API_GENCOOKIE_URL}/generate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(requestBody) });
+            const data = await response.json();
+            if (!data.success) throw new Error('Error al generar cookie');
+            const cookie = data.data.cookie_string;
+            await updateUserCookie(telegramId, cookie);
+            const creditResult = await deductCredits(telegramId, 4);
+            await sendSafeMessage(chatId, `✅ Cookie generada. Créditos restantes: ${creditResult?.newCredits || '?'}.`);
+            await verificarTarjetasConCookie(chatId, telegramId, cookie, tarjetas, null);
+        } catch (err) { 
+            await sendSafeMessage(chatId, `❌ Error al generar cookie: ${err.message}`); 
+        }
+        return;
+    }
+    
+    // Si no son tarjetas, procesar como BIN o extra (el resto del código)
+    // ... (mantén el resto de la lógica igual)
+
     if (param) param = param.trim();
     if (param === '') param = null;
     clearUserState(telegramId);
@@ -2035,6 +2131,7 @@ module.exports = {
     sendSafeMessage, 
     sendLiveToTelegram,   // <-- agregar
     notifyAdminsAndGroups,
+    escapeMarkdown,
     pool 
 };
 
