@@ -33,6 +33,8 @@ app.options('*', cors(corsOptions));  // Manejo explícito de preflight
 
 // 2. Parseo de JSON (IMPORTANTE: ANTES de las rutas)
 app.use(express.json());
+app.use(optionalAuth);   // <-- Aquí
+
 app.use(express.urlencoded({ extended: true }));
 
 

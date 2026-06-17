@@ -40,22 +40,7 @@ const authenticate = async (req, res, next) => {
             });
         }
         
-        // ========== GUARDAR LOG DE ACCESO CON USER_ID ==========
-        try {
-            const ip = req.headers['cf-connecting-ip'] || 
-                    req.headers['x-forwarded-for'] || 
-                    req.connection?.remoteAddress || 
-                    req.ip || 
-                    '0.0.0.0';
-            const userAgent = req.headers['user-agent'] || '';
-            const deviceFingerprint = user.device_fingerprint; // <--- CAMBIADO
 
-            await logUserAccess(user.id, deviceFingerprint, ip, userAgent, req);
-        } catch (logError) {
-            console.error('Error guardando log de acceso:', logError.message);
-        }
-        // ========================================================
-        
         req.user = user;
         next();
         
@@ -95,9 +80,41 @@ const trackActivity = async (req, res, next) => {
     next();
 };
 
+// middleware/auth.js - agrega esta función
+const optionalAuth = async (req, res, next) => {
+    try {
+        const authHeader = req.headers['authorization'];
+        const token = authHeader && authHeader.split(' ')[1];
+        if (!token) return next();
+
+        const decoded = jwt.verify(token, JWT_SECRET);
+        const userResult = await pool.query(
+            'SELECT id, username, role, credits, days_remaining, is_active, device_fingerprint FROM users WHERE id = $1',
+            [decoded.id]
+        );
+        const user = userResult.rows[0];
+        if (user && user.is_active && user.credits > 0) {
+            req.user = user;
+            // Guardar log de acceso con user_id
+            try {
+                const ip = req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for'] || req.connection?.remoteAddress || req.ip || '0.0.0.0';
+                const userAgent = req.headers['user-agent'] || '';
+                const deviceFingerprint = user.device_fingerprint;
+                await logUserAccess(user.id, deviceFingerprint, ip, userAgent, req);
+            } catch (logError) {
+                console.error('Error en optionalAuth log:', logError.message);
+            }
+        }
+    } catch (error) {
+        // Token inválido -> ignorar (no bloquea)
+    }
+    next();
+};
+
 module.exports = { 
     authenticate, 
     requireRole, 
     trackActivity,
+    optionalAuth, 
     JWT_SECRET 
 };
