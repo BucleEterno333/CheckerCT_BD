@@ -121,6 +121,15 @@ router.put('/users/:userId/credits', requireRole('admin'), trackActivity, async 
         }
         await client.query('COMMIT');
         if (newCredits === 0) await kickUserFromGroupByUserId(req.params.userId);
+        // Notificar a administradores
+        await notifyAdminsAndGroups(
+            `💳 *AJUSTE DE CRÉDITOS (ADMIN)*\n` +
+            `👤 Admin: ${req.user.username}\n` +
+            `💰 Créditos nuevos: ${newCredits}\n` +
+            `👤 Usuario: ${user.username}\n` +
+            `📝 Razón: ${reason || 'Ajuste manual'}\n` +
+            `🕒 ${new Date().toLocaleString()}`
+        );
         res.json({ success: true });
     } catch (error) {
         await client.query('ROLLBACK');
@@ -144,6 +153,15 @@ router.put('/users/:userId/days', requireRole('admin'), trackActivity, async (re
         }
         await client.query('COMMIT');
         if (newDays === 0) await kickUserFromGroupByUserId(req.params.userId);
+        // Notificar a administradores
+        await notifyAdminsAndGroups(
+            `📅 *AJUSTE DE DÍAS (ADMIN)*\n` +
+            `👤 Admin: ${req.user.username}\n` +
+            `📆 Días nuevos: ${newDays}\n` +
+            `👤 Usuario: ${user.username}\n` +
+            `📝 Razón: ${reason || 'Ajuste manual'}\n` +
+            `🕒 ${new Date().toLocaleString()}`
+        );
         res.json({ success: true });
     } catch (error) {
         await client.query('ROLLBACK');

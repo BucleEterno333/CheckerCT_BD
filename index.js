@@ -134,64 +134,6 @@ const startServer = async () => {
 };
 
 
-
-
-cron.schedule('1 0 * * *', async () => {
-    console.log('🕒 Ejecutando tarea programada: restando 1 día a todos los usuarios...');
-    const client = await pool.connect();
-    try {
-        await client.query('BEGIN');
-        
-        // Restar 1 día a todos los usuarios con days_remaining > 0
-        const result = await client.query(
-            `UPDATE users 
-             SET days_remaining = GREATEST(0, days_remaining - 1),
-                 updated_at = NOW()
-             WHERE days_remaining > 0
-             RETURNING id, username, days_remaining`
-        );
-        
-        // Identificar usuarios que llegaron a 0 días exactamente después de la resta
-        const usersAtZero = result.rows.filter(u => u.days_remaining === 0);
-        
-        if (usersAtZero.length > 0) {
-            console.log(`⚠️ ${usersAtZero.length} usuarios llegaron a 0 días. Expulsando del grupo...`);
-            const { bot } = require('./bot_telegram');
-            const GROUP_CHAT_ID = process.env.GROUP_CHAT_ID;
-            if (bot && GROUP_CHAT_ID) {
-                for (const user of usersAtZero) {
-                    // Obtener telegram_id del usuario
-                    const tgRes = await client.query('SELECT telegram_id FROM users WHERE id = $1', [user.id]);
-                    const telegramId = tgRes.rows[0]?.telegram_id;
-                    if (telegramId) {
-                        try {
-                            await bot.telegram.kickChatMember(GROUP_CHAT_ID, telegramId);
-                            console.log(`✅ Usuario ${user.username} (${telegramId}) expulsado por días 0`);
-                            // Opcional: enviar mensaje privado
-                            await sendSafeMessage(telegramId, '❌ Tus días han expirado. Has sido expulsado del grupo. Contacta al admin para renovar.');
-                        } catch (err) {
-                            console.error(`Error expulsando a ${telegramId}:`, err.message);
-                        }
-                    }
-                }
-            }
-        }
-        
-        // Opcional: registrar solo si quieres, pero sin tabla system_logs puedes omitir
-        console.log(`✅ Días actualizados para ${result.rowCount} usuarios. (${usersAtZero.length} llegaron a 0)`);
-        
-        await client.query('COMMIT');
-    } catch (error) {
-        await client.query('ROLLBACK');
-        console.error('❌ Error al actualizar días:', error);
-    } finally {
-        client.release();
-    }
-}, {
-    scheduled: true,
-    timezone: "America/Mexico_City"
-});
-
 console.log('⏰ Tarea programada: restar 1 día a las 12:01 AM (hora CDMX)');
 
 startServer();

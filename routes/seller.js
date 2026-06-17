@@ -3,6 +3,8 @@ const router = express.Router();
 const { authenticate, requireRole, trackActivity } = require('../middleware/auth');
 const User = require('../models/User');
 const { pool } = require('../database');
+const { notifyAdminsAndGroups } = require('../utils/notifications');
+
 
 const allowBot = (req, res, next) => {
     const botKey = req.headers['x-bot-key'];
@@ -24,6 +26,15 @@ router.post('/add-credits', requireRole('seller', 'admin'), trackActivity, async
         const targetUser = await User.findById(user_id);
         if (!targetUser || targetUser.role !== 'user') return res.status(400).json({ success: false, error: 'Solo puedes añadir a usuarios normales' });
         const result = await User.addCreditsOrDays(req.user.id, user_id, 'credits', parseInt(amount), reason);
+        // Notificar a administradores
+        await notifyAdminsAndGroups(
+            `💳 *TRANSACCIÓN DE CRÉDITOS*\n` +
+            `👤 Seller: ${req.user.username}\n` +
+            `💰 Créditos otorgados: ${amount}\n` +
+            `👤 Destinatario: ${result.username}\n` +
+            `📝 Razón: ${reason || 'Sin especificar'}\n` +
+            `🕒 ${new Date().toLocaleString()}`
+        );
         res.json({ success: true, message: `Se añadieron ${amount} créditos a ${result.username}` });
     } catch (error) { res.status(500).json({ success: false, error: error.message }); }
 });
@@ -36,6 +47,15 @@ router.post('/add-days', requireRole('seller', 'admin'), trackActivity, async (r
         const targetUser = await User.findById(user_id);
         if (!targetUser || targetUser.role !== 'user') return res.status(400).json({ success: false, error: 'Solo puedes añadir a usuarios normales' });
         const result = await User.addCreditsOrDays(req.user.id, user_id, 'days', parseInt(amount), reason);
+        // Notificar a administradores
+            await notifyAdminsAndGroups(
+                `💳 *TRANSACCIÓN DE DÍAS*\n` +
+                `👤 Seller: ${req.user.username}\n` +
+                `💰 Días otorgados: ${amount}\n` +
+                `👤 Destinatario: ${result.username}\n` +
+                `📝 Razón: ${reason || 'Sin especificar'}\n` +
+                `🕒 ${new Date().toLocaleString()}`
+            );
         res.json({ success: true, message: `Se añadieron ${amount} días a ${result.username}` });
     } catch (error) { res.status(500).json({ success: false, error: error.message }); }
 });
