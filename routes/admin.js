@@ -112,21 +112,27 @@ router.put('/users/:userId/credits', requireRole('admin'), trackActivity, async 
         const { credits, reason = '' } = req.body;
         const newCredits = parseInt(credits);
         if (isNaN(newCredits) || newCredits < 0) throw new Error('Créditos inválidos');
+
         const userResult = await client.query('SELECT credits FROM users WHERE id = $1 FOR UPDATE', [req.params.userId]);
         if (userResult.rows.length === 0) throw new Error('Usuario no encontrado');
         const oldCredits = userResult.rows[0].credits;
+        const username = userResult.rows[0]?.username || 'desconocido';
+
         await client.query('UPDATE users SET credits = $1, updated_at = NOW() WHERE id = $2', [newCredits, req.params.userId]);
         if (newCredits - oldCredits !== 0) {
             await client.query(`INSERT INTO credit_transactions (from_user_id, to_user_id, transaction_type, amount, previous_amount, new_amount, reason) VALUES ($1, $2, 'credits', $3, $4, $5, $6)`, [req.user.id, req.params.userId, newCredits - oldCredits, oldCredits, newCredits, reason || 'Ajuste admin']);
         }
         await client.query('COMMIT');
         if (newCredits === 0) await kickUserFromGroupByUserId(req.params.userId);
+
+        
+
         // Notificar a administradores
         await notifyAdminsAndGroups(
             `💳 *AJUSTE DE CRÉDITOS (ADMIN)*\n` +
             `👤 Admin: ${req.user.username}\n` +
             `💰 Créditos nuevos: ${newCredits}\n` +
-            `👤 Usuario: ${user.username}\n` +
+            `👤 Usuario: ${username}\n` +
             `📝 Razón: ${reason || 'Ajuste manual'}\n` +
             `🕒 ${new Date().toLocaleString()}`
         );

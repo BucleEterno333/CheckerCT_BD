@@ -492,7 +492,7 @@ async function checkAndKickIfNoDaysOrCredits(telegramId, chatId, requiredCredits
     }
     const { credits, days_remaining } = user.rows[0];
     if (days_remaining <= 0) {
-        if (GROUP_CHAT_ID) await bot.kickChatMember(GROUP_CHAT_ID, telegramId).catch(() => {});
+        if (GROUP_CHAT_ID) await kickUserFromGroup(telegramId);
 
         await sendSafeMessage(chatId, '❌ Tus días han expirado.');
         return false;
@@ -2745,7 +2745,7 @@ cron.schedule('1 0 * * *', async () => {
                     if (telegramId) {
                         try {
                             // Usa bot.kickChatMember directamente
-                            await bot.kickChatMember(GROUP_CHAT_ID, telegramId);
+                            await kickUserFromGroup(telegramId);
                             console.log(`✅ Usuario ${user.username} (${telegramId}) expulsado por días 0`);
                             await sendSafeMessage(telegramId, '❌ Tus días han expirado. Has sido expulsado del grupo. Contacta al admin para renovar.');
                         } catch (err) {
