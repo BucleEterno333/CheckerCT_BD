@@ -6,6 +6,7 @@ const TelegramBot = require('node-telegram-bot-api');
 const { Pool } = require('pg');
 const cron = require('node-cron');
 const { isDeviceBanned, logUserAccess, detectMulticuentas, banDevice, unbanDevice, getUserDevices } = require('./utils/deviceUtils');
+const cancellationFlags = new Map();
 
 // ========== CONFIGURACIÓN ==========
 const token = process.env.TELEGRAM_BOT_TOKEN;
@@ -217,26 +218,36 @@ async function procesarExtraConNCookies(chatId, telegramId, extra, numCookies, c
 
 // Función para construir el texto del mensaje de progreso
 function buildProgressMessage(resultados, total, tarjetaActual = null) {
-    // Usar un solo separador fijo (el primero de la lista)
-    const separador = SEPARATORS[0];  // o puedes usar '━━━━━━━━━━━━━━━━━━━' fijo
-        
+    const separador = SEPARATORS[0];
     let text = `📊 *Resultados de chequeo*\n🔍 Progreso: ${resultados.length}/${total}\n`;
-        
+    
     for (const r of resultados) {
         text += `${separador}\n`;
         text += `• Card: \`${r.card}\`\n`;
         text += `• Status: ${r.status}\n`;
     }
-        
+    
     if (tarjetaActual) {
         text += `${separador}\n`;
         text += `• Card: \`${tarjetaActual}\`\n`;
         text += `• Status: Verificando 🔍\n`;
     }
-        
-    return text
+    
+    // Si ya se completó el chequeo, agregar resumen de estadísticas
+    if (resultados.length === total && total > 0) {
+        let lives = 0, deads = 0;
+        for (const r of resultados) {
+            if (r.status.includes('LIVE')) lives++;
+            else if (r.status.includes('DEAD')) deads++;
+        }
+        text += `\n${separador}\n`;
+        text += `✅ *Chequeo finalizado*\n`;
+        text += `💚 Lives: ${lives}\n`;
+        text += `❌ Dead: ${deads}\n`;
+    }
+    
+    return text;
 }
-
 
 
 
@@ -317,22 +328,32 @@ async function notifyAdminsAndGroups(message, parseMode = 'Markdown') {
 
 
 function limpiarTarjetas(textoSucio) {
-    const lineas = textoSucio.split(/\r?\n/);
+    if (!textoSucio) return [];
+    // Limpiar caracteres no imprimibles y normalizar separadores
+    let texto = textoSucio.replace(/\s+/g, ' ').trim();
+    // Reemplazar separadores comunes por '|'
+    texto = texto.replace(/[│,;\t]+/g, '|');
+    
     const tarjetas = [];
-    for (let linea of lineas) {
-        linea = linea.trim();
-        if (!linea) continue;
-        let match = linea.match(/(\d{16})\s*[|│]\s*(\d{2})\s*[|│]\s*(\d{4})\s*[|│]\s*(\d{3,4})/);
-        if (match) {
-            tarjetas.push(`${match[1]}|${match[2]}|${match[3]}|${match[4]}`);
-            continue;
-        }
-        match = linea.match(/(\d{16})\s+(\d{2})\s+(\d{4})\s+(\d{3,4})/);
-        if (match) {
+    // Buscar en todo el texto con regex global
+    const regex = /(\d{16})\s*[|]\s*(\d{2})\s*[|]\s*(\d{4})\s*[|]\s*(\d{3,4})/g;
+    let match;
+    while ((match = regex.exec(texto)) !== null) {
+        tarjetas.push(`${match[1]}|${match[2]}|${match[3]}|${match[4]}`);
+    }
+    // Si no se encontró con '|', buscar con espacios
+    if (tarjetas.length === 0) {
+        const regex2 = /(\d{16})\s+(\d{2})\s+(\d{4})\s+(\d{3,4})/g;
+        while ((match = regex2.exec(texto)) !== null) {
             tarjetas.push(`${match[1]}|${match[2]}|${match[3]}|${match[4]}`);
         }
     }
-    return [...new Set(tarjetas)];
+    // Eliminar duplicados
+    const unicos = [...new Set(tarjetas)];
+    if (unicos.length === 0) {
+        console.log(`⚠️ limpiarTarjetas no encontró tarjetas en: "${textoSucio}"`);
+    }
+    return unicos;
 }
 
 function normalizarExtra(texto) {
@@ -834,6 +855,56 @@ async function handleBinlistCommand(chatId, telegramId, query) {
     await sendSafeMessage(chatId, `📋 *Bins encontrados para ${query}:*\n\n💳 Lista de bins:\n${binsUnicos.join(', ')}`, { parse_mode: 'Markdown' });
 }
 
+// ========== COMANDO MULTIEXTRA (handler separado) ==========
+async function handleMultiExtraCommand(chatId, telegramId, input) {
+    // Si no hay input, pedir interactivo
+    if (!input) {
+        setUserState(telegramId, { step: 'awaiting_multiextra_input' });
+        return sendSafeMessage(chatId, '📌 Envía un BIN, nombre de banco, o una lista de extras (uno por línea)');
+    }
+
+    // Procesar input
+    let extras = [];
+    let esBin = /^\d{6}$/.test(input);
+    let esBanco = !esBin && getBinForBank?.(input) !== null;
+
+    if (esBin || esBanco) {
+        const bin = esBin ? input : getBinForBank(input);
+        await sendSafeMessage(chatId, `🔮 Extrapolando desde ${bin}...`);
+        try {
+            const allExtras = await getPatternsFromBin(chatId, bin);
+            if (!allExtras.length) throw new Error('No se encontraron extras');
+            extras = allExtras;
+            const listaMostrada = extras.map((e, i) => `${i+1}. \`${e}\``).join('\n');
+            await sendSafeMessage(chatId, `📋 *Extras encontrados (${extras.length}):*\n${listaMostrada}`, { parse_mode: 'Markdown' });
+        } catch (err) {
+            return sendSafeMessage(chatId, `❌ Error al extrapolar: ${err.message}`);
+        }
+    } else {
+        // Parsear lista de extras (líneas con |)
+        const lineas = input.split(/\r?\n/);
+        for (const linea of lineas) {
+            const trimmed = linea.trim();
+            if (!trimmed) continue;
+            const matchExtra = trimmed.match(/([0-9X]{6,16}\|\d{1,2}\|\d{2,4}(?:\|rnd)?)/);
+            if (matchExtra) {
+                let extra = matchExtra[1];
+                if (!extra.endsWith('|rnd')) extra += '|rnd';
+                extras.push(extra);
+            }
+        }
+        if (extras.length === 0) {
+            return sendSafeMessage(chatId, '❌ No se detectaron patrones de extra. Envía un BIN, banco o lista de extras.');
+        }
+        const listaMostrada = extras.map((e, i) => `${i+1}. \`${e}\``).join('\n');
+        await sendSafeMessage(chatId, `📋 *Extras encontrados (${extras.length}):*\n${listaMostrada}`, { parse_mode: 'Markdown' });
+    }
+
+    // Guardar extras en estado y preguntar cuántos usar
+    setUserState(telegramId, { step: 'awaiting_multiextra_extra_count', data: { extras } });
+    await sendSafeMessage(chatId, `🔢 ¿Cuántos extras deseas usar? (1-${extras.length})`);
+}
+
 async function handleExtrapoladorCommand(chatId, telegramId, input) {
     if (!await checkAndKickIfNoDaysOrCredits(telegramId, chatId, 10)) return;
     let bin = input;
@@ -1072,11 +1143,11 @@ async function handleAmazonCommand(chatId, telegramId, param) {
 }
 
 
-// ========== COMANDO /amazoncookieinfinita (OPTIMIZADO CON MÚLTIPLES COOKIES Y REINTENTOS) ==========
 async function handleAmazonCookieInfinita(chatId, telegramId, fullParam) {
-    // Limpiar estado para evitar timeout
+    // Limpiar estado anterior
     clearUserState(telegramId);
-
+    // Activar flag de cancelación
+    cancellationFlags.set(telegramId, false);
 
     // Función para verificar una tarjeta (con reintentos por wallet)
     async function verificarTarjeta(card, cookie) {
@@ -1130,96 +1201,129 @@ async function handleAmazonCookieInfinita(chatId, telegramId, fullParam) {
     const total = tarjetas.length;
     await sendSafeMessage(chatId, `🎴 *Tarjetas a verificar (${total}):*\n${tarjetas.slice(0, 20).map(t => `\`${t}\``).join('\n')}${total > 20 ? `\n... y ${total - 20} más` : ''}`, { parse_mode: 'Markdown' });
 
-    await sendSafeMessage(chatId, `🍪 Generando cookies... (4 créditos cada una)`);
+    // Mensaje de cancelación
+    await sendSafeMessage(chatId, '💡 *Si deseas cancelar el proceso, envía un mensaje diciendo "Cancelar"*');
 
-    // Calcular número de cookies necesarias (promedio 13 tarjetas por cookie)
+    // Calcular número de cookies necesarias
     const COOKIE_CAPACITY = 13;
     let cookiesNeeded = Math.ceil(total / COOKIE_CAPACITY);
     if (cookiesNeeded < 1) cookiesNeeded = 1;
-    if (cookiesNeeded > 10) cookiesNeeded = 10; // límite por seguridad
+    if (cookiesNeeded > 10) cookiesNeeded = 10;
 
-    // Generar cookies iniciales y una de reserva extra
+    // Mensaje para mostrar el progreso de generación de cookies
+    let cookieMsg = await sendSafeMessage(chatId, '🍪 *Generando cookies...*', { parse_mode: 'Markdown' });
+    if (!cookieMsg) return;
+    let cookieLines = [];
     let cookiesDisponibles = [];
+
+    // Generar cookies una por una y actualizar el mensaje
     for (let i = 0; i < cookiesNeeded + 1; i++) {
+        // Si se ha solicitado cancelar, salir
+        if (cancellationFlags.get(telegramId)) {
+            await sendSafeMessage(chatId, '⏹️ Proceso cancelado durante la generación de cookies.');
+            cancellationFlags.delete(telegramId);
+            return;
+        }
+
+        const lineIndex = i;
+        cookieLines.push(`🍪 Cookie No. ${i+1}: generando...`);
+        let newText = '🍪 *Generación de cookies:*\n' + cookieLines.join('\n');
+        try {
+            await bot.editMessageText(newText, { chat_id: chatId, message_id: cookieMsg.message_id, parse_mode: 'Markdown' });
+        } catch (e) {}
+
         try {
             const cookie = await generarCookieUnica(telegramId);
-
             cookiesDisponibles.push(cookie);
+            cookieLines[lineIndex] = `✅ Cookie No. ${i+1}: creada exitosamente`;
+            newText = '🍪 *Generación de cookies:*\n' + cookieLines.join('\n');
+            await bot.editMessageText(newText, { chat_id: chatId, message_id: cookieMsg.message_id, parse_mode: 'Markdown' });
         } catch (err) {
-            console.error(`Error generando cookie ${i+1}:`, err.message);
+            cookieLines[lineIndex] = `❌ Cookie No. ${i+1}: error al generar (${err.message})`;
+            newText = '🍪 *Generación de cookies:*\n' + cookieLines.join('\n');
+            await bot.editMessageText(newText, { chat_id: chatId, message_id: cookieMsg.message_id, parse_mode: 'Markdown' });
+            // Si falla, no la añadimos a disponibles, pero continuamos con las siguientes
         }
+        // Pequeña pausa para no saturar
+        await new Promise(r => setTimeout(r, 500));
     }
-    let cookieIndex = 0;
-    let currentCookie = cookiesDisponibles[cookieIndex] || null;
-    let stats = { lives: 0, deads: 0, errors: 0, cookiesUsadas: cookiesDisponibles.length };
+
+    // Si no hay cookies disponibles, abortar
+    if (cookiesDisponibles.length === 0) {
+        await sendSafeMessage(chatId, '❌ No se pudo generar ninguna cookie. Proceso abortado.');
+        cancellationFlags.delete(telegramId);
+        return;
+    }
+
+    // Mensaje de chequeo
+    let stats = { lives: 0, deads: 0, errors: 0, cookiesUsadas: 0 };
     let resultados = [];
     let progressMsg = null;
-
-    // Mensaje inicial
     const textoInicial = buildProgressMessage(resultados, total, tarjetas[0]);
     progressMsg = await sendSafeMessage(chatId, textoInicial, { parse_mode: 'Markdown' });
-    if (!progressMsg) return;
+    if (!progressMsg) {
+        cancellationFlags.delete(telegramId);
+        return;
+    }
 
-    // Función para reponer cookies en segundo plano
+    let cookieIndex = 0;
+    let currentCookie = cookiesDisponibles[cookieIndex] || null;
+
+    // Función para reponer cookies en segundo plano (si se necesita)
     const reponerCookie = async () => {
         if (cookiesDisponibles.length <= cookieIndex + 1) {
+            // Solo si hay menos cookies de las necesarias
             try {
                 const nueva = await generarCookieUnica(telegramId);
                 cookiesDisponibles.push(nueva);
+                // Agregar línea al mensaje de cookies
+                const idx = cookiesDisponibles.length - 1;
+                cookieLines.push(`✅ Cookie No. ${idx+1}: creada exitosamente (extra)`);
+                let newText = '🍪 *Generación de cookies:*\n' + cookieLines.join('\n');
+                await bot.editMessageText(newText, { chat_id: chatId, message_id: cookieMsg.message_id, parse_mode: 'Markdown' });
                 stats.cookiesUsadas++;
-                console.log(`🍪 Cookie extra generada (total ${cookiesDisponibles.length})`);
             } catch (err) {
                 console.error('Error generando cookie extra:', err.message);
             }
         }
     };
 
-    // Inicialmente, asegurar que haya al menos una de reserva
-    await reponerCookie();
-
+    // Chequeo de tarjetas
     for (let i = 0; i < total; i++) {
+        // Verificar cancelación
+        if (cancellationFlags.get(telegramId)) {
+            await sendSafeMessage(chatId, '⏹️ Proceso cancelado por el usuario.');
+            await bot.editMessageText(buildProgressMessage(resultados, total, null), { chat_id: chatId, message_id: progressMsg.message_id, parse_mode: 'Markdown' });
+            cancellationFlags.delete(telegramId);
+            return;
+        }
+
         const card = tarjetas[i];
-        // Actualizar mensaje con "Verificando"
         const textoPendiente = buildProgressMessage(resultados, total, card);
         try {
             await bot.editMessageText(textoPendiente, { chat_id: chatId, message_id: progressMsg.message_id, parse_mode: 'Markdown' });
         } catch (e) {}
 
-        // Verificar con cookie actual
         let resultado = await verificarTarjeta(card, currentCookie);
 
-        // Si es un error (no LIVE/DEAD) y no es baneo, reintentar una vez
-        let reintentoRealizado = false;
+        // Si es error y no es baneo, reintentar una vez
         if (resultado.status !== 'LIVE' && resultado.status !== 'DEAD' && !resultado.isBanned) {
-            // Mostrar "ERROR - Reintentando chequeo"
-            const idx = resultados.findIndex(r => r.card === card);
-            if (idx === -1) {
-                resultados.push({
-                    card: card,
-                    status: 'ERROR - Reintentando chequeo ⚠️'
-                });
-            } else {
-                resultados[idx].status = 'ERROR - Reintentando chequeo ⚠️';
-            }
-            const textoReintento = buildProgressMessage(resultados, total, null);
-            try {
-                await bot.editMessageText(textoReintento, { chat_id: chatId, message_id: progressMsg.message_id, parse_mode: 'Markdown' });
-            } catch (e) {}
-
-            // Reintentar una vez con la misma cookie
             const reintento = await verificarTarjeta(card, currentCookie);
             if (reintento.status === 'LIVE' || reintento.status === 'DEAD') {
                 resultado = reintento;
-            } else {
-                // Si sigue en error, mantener el error
-                resultado = reintento;
             }
-            reintentoRealizado = true;
         }
 
-        // Si la cookie expiró o cuenta baneada, cambiar a la siguiente cookie
+        // Si la cookie expiró o cuenta baneada
         if (resultado.isBanned) {
-            // Intentar cambiar a la siguiente cookie
+            // Actualizar línea de la cookie actual como baneada
+            if (cookieIndex < cookieLines.length) {
+                cookieLines[cookieIndex] = `❌ Cookie No. ${cookieIndex+1}: baneada`;
+                let newText = '🍪 *Generación de cookies:*\n' + cookieLines.join('\n');
+                await bot.editMessageText(newText, { chat_id: chatId, message_id: cookieMsg.message_id, parse_mode: 'Markdown' });
+            }
+
+            // Intentar cambiar a siguiente cookie
             if (cookiesDisponibles.length > cookieIndex + 1) {
                 cookieIndex++;
                 currentCookie = cookiesDisponibles[cookieIndex];
@@ -1229,38 +1333,43 @@ async function handleAmazonCookieInfinita(chatId, telegramId, fullParam) {
                 // Reintentar la misma tarjeta con la nueva cookie
                 const reintentoBaneo = await verificarTarjeta(card, currentCookie);
                 if (reintentoBaneo.isBanned) {
-                    // Si sigue baneada, es un baneo definitivo
-                    resultados.push({
-                        card: card,
-                        status: 'ERROR - Cuenta baneada ⛔'
-                    });
+                    resultados.push({ card, status: 'ERROR - Cuenta baneada ⛔' });
                     const finalText = buildProgressMessage(resultados, total, null);
-                    try {
-                        await bot.editMessageText(finalText, { chat_id: chatId, message_id: progressMsg.message_id, parse_mode: 'Markdown' });
-                    } catch (e) {}
-                    await sendSafeMessage(chatId, `⛔ Cuenta baneada detectada en tarjeta ${i+1}. Proceso cancelado.`);
+                    await bot.editMessageText(finalText, { chat_id: chatId, message_id: progressMsg.message_id, parse_mode: 'Markdown' });
+                    await sendSafeMessage(chatId, `⛔ Cuenta baneada en tarjeta ${i+1}. Proceso cancelado.`);
+                    cancellationFlags.delete(telegramId);
                     return;
                 } else {
                     resultado = reintentoBaneo;
                 }
             } else {
-                // No hay cookies disponibles, generar una nueva
-                currentCookie = await generarCookieUnica(telegramId);
-                stats.cookiesUsadas++;
-                const reintentoBaneo = await verificarTarjeta(card, currentCookie);
-                if (reintentoBaneo.isBanned) {
-                    resultados.push({
-                        card: card,
-                        status: 'ERROR - Cuenta baneada ⛔'
-                    });
-                    const finalText = buildProgressMessage(resultados, total, null);
-                    try {
+                // No hay más cookies, generar una nueva
+                try {
+                    currentCookie = await generarCookieUnica(telegramId);
+                    cookiesDisponibles.push(currentCookie);
+                    const idx = cookiesDisponibles.length - 1;
+                    cookieLines.push(`✅ Cookie No. ${idx+1}: creada exitosamente (extra)`);
+                    let newText = '🍪 *Generación de cookies:*\n' + cookieLines.join('\n');
+                    await bot.editMessageText(newText, { chat_id: chatId, message_id: cookieMsg.message_id, parse_mode: 'Markdown' });
+                    stats.cookiesUsadas++;
+                    const reintentoBaneo = await verificarTarjeta(card, currentCookie);
+                    if (reintentoBaneo.isBanned) {
+                        resultados.push({ card, status: 'ERROR - Cuenta baneada ⛔' });
+                        const finalText = buildProgressMessage(resultados, total, null);
                         await bot.editMessageText(finalText, { chat_id: chatId, message_id: progressMsg.message_id, parse_mode: 'Markdown' });
-                    } catch (e) {}
-                    await sendSafeMessage(chatId, `⛔ Cuenta baneada detectada en tarjeta ${i+1}. Proceso cancelado.`);
+                        await sendSafeMessage(chatId, `⛔ Cuenta baneada en tarjeta ${i+1}. Proceso cancelado.`);
+                        cancellationFlags.delete(telegramId);
+                        return;
+                    } else {
+                        resultado = reintentoBaneo;
+                    }
+                } catch (err) {
+                    resultados.push({ card, status: 'ERROR - Sin cookies disponibles ⛔' });
+                    const finalText = buildProgressMessage(resultados, total, null);
+                    await bot.editMessageText(finalText, { chat_id: chatId, message_id: progressMsg.message_id, parse_mode: 'Markdown' });
+                    await sendSafeMessage(chatId, `❌ No se pudo generar nueva cookie. Proceso cancelado.`);
+                    cancellationFlags.delete(telegramId);
                     return;
-                } else {
-                    resultado = reintentoBaneo;
                 }
             }
         }
@@ -1306,15 +1415,8 @@ async function handleAmazonCookieInfinita(chatId, telegramId, fullParam) {
             statusDisplay = `ERROR ⚠️`;
         }
 
-        // Actualizar el resultado final (reemplazar el "Reintentando" si existía)
-        const existingIndex = resultados.findIndex(r => r.card === card);
-        if (existingIndex !== -1) {
-            resultados[existingIndex].status = statusDisplay;
-        } else {
-            resultados.push({ card, status: statusDisplay });
-        }
+        resultados.push({ card, status: statusDisplay });
 
-        // Actualizar mensaje de progreso
         const nextCard = (i + 1 < total) ? tarjetas[i + 1] : null;
         const nuevoTexto = buildProgressMessage(resultados, total, nextCard);
         try {
@@ -1326,8 +1428,10 @@ async function handleAmazonCookieInfinita(chatId, telegramId, fullParam) {
     // Resumen final
     const resumen = `📊 *RESULTADO FINAL*\n🔹 Tarjetas: ${total}\n🔹 Créditos gastados: ${stats.cookiesUsadas * 4}\n💚 LIVE: ${stats.lives} | ❌ DEAD: ${stats.deads} | ⚠️ ERROR: ${stats.errors}\n🍪 Cookies usadas: ${stats.cookiesUsadas}`;
     await sendSafeMessage(chatId, resumen, { parse_mode: 'Markdown' });
-}
 
+    // Limpiar flag
+    cancellationFlags.delete(telegramId);
+}
 
 // ========== GESTIÓN DE ESTADOS INTERACTIVOS ==========
 const userStates = new Map();
@@ -1858,57 +1962,18 @@ bot.onText(/^[\/\.]setplan(40|80|150|250)(?:\s+([^\s]+))?/i, async (msg, match) 
 });
 
 // ========== COMANDO /amazonmultiextra ==========
-bot.onText(/^[\/\.](?:amazonmultiextra|amzme|multiextra)(?:\s+([\s\S]+))?/i, async (msg, match) => {
+bot.onText(/^[\/\.](?:amazonmultiextra|amzme|amazonme|multiextra)(?:\s+([\s\S]+))?/i, async (msg, match) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
     let input = match[1] ? match[1].trim() : '';
 
-    // Si no hay input, pedir interactivo
-    if (!input) {
-        setUserState(telegramId, { step: 'awaiting_multiextra_input' });
-        return sendSafeMessage(chatId, '📌 Envía un BIN, nombre de banco, o una lista de extras (uno por línea)');
+    // Si no hay input pero hay reply, usar el texto del mensaje respondido
+    if (!input && msg.reply_to_message?.text) {
+        input = msg.reply_to_message.text.trim();
     }
 
-    // Procesar input
-    let extras = [];
-    let esBin = /^\d{6}$/.test(input);
-    let esBanco = !esBin && getBinForBank?.(input) !== null;
-
-    if (esBin || esBanco) {
-        const bin = esBin ? input : getBinForBank(input);
-        await sendSafeMessage(chatId, `🔮 Extrapolando desde ${bin}...`);
-        try {
-            const allExtras = await getPatternsFromBin(chatId, bin);
-            if (!allExtras.length) throw new Error('No se encontraron extras');
-            extras = allExtras;
-            const listaMostrada = extras.map((e, i) => `${i+1}. \`${e}\``).join('\n');
-            await sendSafeMessage(chatId, `📋 *Extras encontrados (${extras.length}):*\n${listaMostrada}`, { parse_mode: 'Markdown' });
-        } catch (err) {
-            return sendSafeMessage(chatId, `❌ Error al extrapolar: ${err.message}`);
-        }
-    } else {
-        // Parsear lista de extras (líneas con |)
-        const lineas = input.split(/\r?\n/);
-        for (const linea of lineas) {
-            const trimmed = linea.trim();
-            if (!trimmed) continue;
-            const matchExtra = trimmed.match(/([0-9X]{6,16}\|\d{1,2}\|\d{2,4}(?:\|rnd)?)/);
-            if (matchExtra) {
-                let extra = matchExtra[1];
-                if (!extra.endsWith('|rnd')) extra += '|rnd';
-                extras.push(extra);
-            }
-        }
-        if (extras.length === 0) {
-            return sendSafeMessage(chatId, '❌ No se detectaron patrones de extra. Envía un BIN, banco o lista de extras.');
-        }
-        const listaMostrada = extras.map((e, i) => `${i+1}. \`${e}\``).join('\n');
-        await sendSafeMessage(chatId, `📋 *Extras encontrados (${extras.length}):*\n${listaMostrada}`, { parse_mode: 'Markdown' });
-    }
-
-    // Guardar extras en estado y preguntar cuántos usar
-    setUserState(telegramId, { step: 'awaiting_multiextra_extra_count', data: { extras } });
-    await sendSafeMessage(chatId, `🔢 ¿Cuántos extras deseas usar? (1-${extras.length})`);
+    // Llamar al handler separado
+    await handleMultiExtraCommand(chatId, telegramId, input);
 });
 
 bot.onText(/^[\/\.]setadmin(?:\s+([^\s]+))?/i, async (msg, match) => {
@@ -2558,6 +2623,18 @@ cron.schedule('0 2 * * *', async () => {
 
 // ========== MANEJADOR DE MENSAJES PARA ESTADOS INTERACTIVOS ==========
 bot.on('message', async (msg) => {
+
+    // Cancelación interactiva para procesos largos
+    if (userText && userText.toLowerCase() === 'cancelar'  ) {
+        if (cancellationFlags.has(telegramId) && cancellationFlags.get(telegramId) === false) {
+            cancellationFlags.set(telegramId, true);
+            await sendSafeMessage(chatId, '⏹️ Proceso cancelado por el usuario.');
+            return;
+        } else if (cancellationFlags.has(telegramId) && cancellationFlags.get(telegramId) === true) {
+            await sendSafeMessage(chatId, '⏹️ El proceso ya está siendo cancelado.');
+            return;
+        }
+    }
     const telegramId = msg.from.id;
     // Detectar cambios de perfil automáticamente
     const userRes = await pool.query('SELECT id FROM users WHERE telegram_id = $1', [telegramId]);

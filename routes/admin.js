@@ -153,6 +153,7 @@ router.put('/users/:userId/days', requireRole('admin'), trackActivity, async (re
         const userResult = await client.query('SELECT days_remaining FROM users WHERE id = $1 FOR UPDATE', [req.params.userId]);
         if (userResult.rows.length === 0) throw new Error('Usuario no encontrado');
         const oldDays = userResult.rows[0].days_remaining;
+        const username = userResult.rows[0]?.username || 'desconocido';
         await client.query('UPDATE users SET days_remaining = $1, updated_at = NOW() WHERE id = $2', [newDays, req.params.userId]);
         if (newDays - oldDays !== 0) {
             await client.query(`INSERT INTO credit_transactions (from_user_id, to_user_id, transaction_type, amount, previous_amount, new_amount, reason) VALUES ($1, $2, 'days', $3, $4, $5, $6)`, [req.user.id, req.params.userId, newDays - oldDays, oldDays, newDays, reason || 'Ajuste admin']);
@@ -164,7 +165,7 @@ router.put('/users/:userId/days', requireRole('admin'), trackActivity, async (re
             `📅 *AJUSTE DE DÍAS (ADMIN)*\n` +
             `👤 Admin: ${req.user.username}\n` +
             `📆 Días nuevos: ${newDays}\n` +
-            `👤 Usuario: ${user.username}\n` +
+            `👤 Usuario: ${username}\n` +
             `📝 Razón: ${reason || 'Ajuste manual'}\n` +
             `🕒 ${new Date().toLocaleString()}`
         );
