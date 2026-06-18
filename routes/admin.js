@@ -216,6 +216,27 @@ router.get('/stats/platform', requireRole('admin'), async (req, res) => {
     } catch (error) { res.status(500).json({ success: false, error: error.message }); }
 });
 
+// ========== OBTENER LIVES DE UN USUARIO ==========
+router.get('/users/:userId/lives', requireRole('admin'), async (req, res) => {
+    try {
+        const userId = req.params.userId;
+        const result = await pool.query(
+            `SELECT id, card_full, card_last_four, card_bin, card_type, bank_name, 
+                    country, gate_name, status, phase, check_date, check_time, 
+                    notes, created_at, device_name, associated_page, network, card_class
+             FROM user_lives 
+             WHERE user_id = $1 
+             ORDER BY created_at DESC 
+             LIMIT 1000`,
+            [userId]
+        );
+        res.json({ success: true, lives: result.rows });
+    } catch (error) {
+        console.error('Error al obtener lives:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
 router.get('/transactions/sellers', requireRole('admin'), async (req, res) => {
     try {
         const { page = 1, limit = 50 } = req.query;
