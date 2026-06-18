@@ -113,29 +113,34 @@ router.put('/users/:userId/credits', requireRole('admin'), trackActivity, async 
         const newCredits = parseInt(credits);
         if (isNaN(newCredits) || newCredits < 0) throw new Error('Créditos inválidos');
 
-        const userResult = await client.query('SELECT credits FROM users WHERE id = $1 FOR UPDATE', [req.params.userId]);
+        // Obtener usuario completo (incluyendo username)
+        const userResult = await client.query('SELECT id, username, credits FROM users WHERE id = $1 FOR UPDATE', [req.params.userId]);
         if (userResult.rows.length === 0) throw new Error('Usuario no encontrado');
-        const oldCredits = userResult.rows[0].credits;
-        const username = userResult.rows[0]?.username || 'desconocido';
+        const user = userResult.rows[0];
+        const oldCredits = user.credits;
 
-        await client.query('UPDATE users SET credits = $1, updated_at = NOW() WHERE id = $2', [newCredits, req.params.userId]);
-        if (newCredits - oldCredits !== 0) {
-            await client.query(`INSERT INTO credit_transactions (from_user_id, to_user_id, transaction_type, amount, previous_amount, new_amount, reason) VALUES ($1, $2, 'credits', $3, $4, $5, $6)`, [req.user.id, req.params.userId, newCredits - oldCredits, oldCredits, newCredits, reason || 'Ajuste admin']);
+        // Solo actualizar si realmente cambió
+        if (newCredits !== oldCredits) {
+            await client.query('UPDATE users SET credits = $1, updated_at = NOW() WHERE id = $2', [newCredits, req.params.userId]);
+            await client.query(
+                `INSERT INTO credit_transactions (from_user_id, to_user_id, transaction_type, amount, previous_amount, new_amount, reason)
+                 VALUES ($1, $2, 'credits', $3, $4, $5, $6)`,
+                [req.user.id, req.params.userId, newCredits - oldCredits, oldCredits, newCredits, reason || 'Ajuste admin']
+            );
+            
+            // Notificar solo si hubo cambio
+            await notifyAdminsAndGroups(
+                `💳 *AJUSTE DE CRÉDITOS (ADMIN)*\n` +
+                `👤 Admin: ${req.user.username}\n` +
+                `💰 Créditos nuevos: ${newCredits}\n` +
+                `👤 Usuario: ${user.username}\n` +
+                `📝 Razón: ${reason || 'Ajuste manual'}\n` +
+                `🕒 ${new Date().toLocaleString()}`
+            );
         }
+
         await client.query('COMMIT');
         if (newCredits === 0) await kickUserFromGroupByUserId(req.params.userId);
-
-        
-
-        // Notificar a administradores
-        await notifyAdminsAndGroups(
-            `💳 *AJUSTE DE CRÉDITOS (ADMIN)*\n` +
-            `👤 Admin: ${req.user.username}\n` +
-            `💰 Créditos nuevos: ${newCredits}\n` +
-            `👤 Usuario: ${username}\n` +
-            `📝 Razón: ${reason || 'Ajuste manual'}\n` +
-            `🕒 ${new Date().toLocaleString()}`
-        );
         res.json({ success: true });
     } catch (error) {
         await client.query('ROLLBACK');
@@ -150,25 +155,35 @@ router.put('/users/:userId/days', requireRole('admin'), trackActivity, async (re
         const { days, reason = '' } = req.body;
         const newDays = parseInt(days);
         if (isNaN(newDays) || newDays < 0) throw new Error('Días inválidos');
-        const userResult = await client.query('SELECT days_remaining FROM users WHERE id = $1 FOR UPDATE', [req.params.userId]);
+
+        // Obtener usuario completo (incluyendo username)
+        const userResult = await client.query('SELECT id, username, days_remaining FROM users WHERE id = $1 FOR UPDATE', [req.params.userId]);
         if (userResult.rows.length === 0) throw new Error('Usuario no encontrado');
-        const oldDays = userResult.rows[0].days_remaining;
-        const username = userResult.rows[0]?.username || 'desconocido';
-        await client.query('UPDATE users SET days_remaining = $1, updated_at = NOW() WHERE id = $2', [newDays, req.params.userId]);
-        if (newDays - oldDays !== 0) {
-            await client.query(`INSERT INTO credit_transactions (from_user_id, to_user_id, transaction_type, amount, previous_amount, new_amount, reason) VALUES ($1, $2, 'days', $3, $4, $5, $6)`, [req.user.id, req.params.userId, newDays - oldDays, oldDays, newDays, reason || 'Ajuste admin']);
+        const user = userResult.rows[0];
+        const oldDays = user.days_remaining;
+
+        // Solo actualizar si realmente cambió
+        if (newDays !== oldDays) {
+            await client.query('UPDATE users SET days_remaining = $1, updated_at = NOW() WHERE id = $2', [newDays, req.params.userId]);
+            await client.query(
+                `INSERT INTO credit_transactions (from_user_id, to_user_id, transaction_type, amount, previous_amount, new_amount, reason)
+                 VALUES ($1, $2, 'days', $3, $4, $5, $6)`,
+                [req.user.id, req.params.userId, newDays - oldDays, oldDays, newDays, reason || 'Ajuste admin']
+            );
+            
+            // Notificar solo si hubo cambio
+            await notifyAdminsAndGroups(
+                `📅 *AJUSTE DE DÍAS (ADMIN)*\n` +
+                `👤 Admin: ${req.user.username}\n` +
+                `📆 Días nuevos: ${newDays}\n` +
+                `👤 Usuario: ${user.username}\n` +
+                `📝 Razón: ${reason || 'Ajuste manual'}\n` +
+                `🕒 ${new Date().toLocaleString()}`
+            );
         }
+
         await client.query('COMMIT');
         if (newDays === 0) await kickUserFromGroupByUserId(req.params.userId);
-        // Notificar a administradores
-        await notifyAdminsAndGroups(
-            `📅 *AJUSTE DE DÍAS (ADMIN)*\n` +
-            `👤 Admin: ${req.user.username}\n` +
-            `📆 Días nuevos: ${newDays}\n` +
-            `👤 Usuario: ${username}\n` +
-            `📝 Razón: ${reason || 'Ajuste manual'}\n` +
-            `🕒 ${new Date().toLocaleString()}`
-        );
         res.json({ success: true });
     } catch (error) {
         await client.query('ROLLBACK');
