@@ -4,7 +4,8 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const { pool } = require('../database');
-const { trackActivity } = require('../middleware/auth');
+const { trackActivity, authenticate } = require('../middleware/auth');
+
 const { isDeviceBanned, logUserAccess, detectMulticuentas } = require('../utils/deviceUtils');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'checkerct-secret-key';
