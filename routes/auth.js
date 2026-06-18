@@ -113,6 +113,20 @@ router.post('/verify-code', trackActivity, async (req, res) => {
     } finally { client.release(); }
 });
 
+// ========== VERIFICAR TOKEN (con log de acceso) ==========
+router.get('/verify', authenticate, (req, res) => {
+    res.json({ 
+        success: true, 
+        user: {
+            id: req.user.id,
+            username: req.user.username,
+            role: req.user.role,
+            credits: req.user.credits,
+            days_remaining: req.user.days_remaining
+        }
+    });
+});
+
 // ========== LOGIN (CORREGIDO, SIN DUPLICADO) ==========
 router.post('/login', trackActivity, async (req, res) => {
     try {

@@ -39,13 +39,26 @@ const authenticate = async (req, res, next) => {
             });
         }
 
-        // ✅ GUARDAR LOG DE ACCESO (solo si el usuario está autenticado)
+        // ✅ OBTENER FINGERPRINT DEL HEADER
+        const headerFingerprint = req.headers['x-device-fingerprint'] || null;
+        let deviceFingerprint = headerFingerprint;
+
+        // ✅ Si el usuario no tiene fingerprint guardado o es diferente, actualizarlo
+        if (deviceFingerprint && (!user.device_fingerprint || user.device_fingerprint !== deviceFingerprint)) {
+            await pool.query(
+                'UPDATE users SET device_fingerprint = $1 WHERE id = $2',
+                [deviceFingerprint, user.id]
+            );
+            user.device_fingerprint = deviceFingerprint; // actualizar en el objeto user
+        }
+
+        // ✅ GUARDAR LOG DE ACCESO
         try {
             const ip = req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for'] || req.connection?.remoteAddress || req.ip || '0.0.0.0';
             const userAgent = req.headers['user-agent'] || '';
-            // Usar el fingerprint que ya tiene el usuario (si lo tiene)
-            const deviceFingerprint = user.device_fingerprint || null;
-            await logUserAccess(user.id, deviceFingerprint, ip, userAgent, req);
+            // Usar el fingerprint del header (si no, el que tenga guardado el usuario)
+            const fpParaLog = deviceFingerprint || user.device_fingerprint || null;
+            await logUserAccess(user.id, fpParaLog, ip, userAgent, req);
         } catch (logError) {
             console.error('❌ Error guardando log de acceso en authenticate:', logError.message);
         }
@@ -60,7 +73,6 @@ const authenticate = async (req, res, next) => {
         });
     }
 };
-
 // Middleware para verificar roles específicos
 const requireRole = (...roles) => {
     return (req, res, next) => {
@@ -104,18 +116,32 @@ const optionalAuth = async (req, res, next) => {
         const user = userResult.rows[0];
         if (user && user.is_active && user.credits > 0) {
             req.user = user;
-            // Guardar log de acceso para usuarios autenticados (opcional)
+            
+            // Obtener fingerprint del header
+            const headerFingerprint = req.headers['x-device-fingerprint'] || null;
+            let deviceFingerprint = headerFingerprint;
+
+            // Actualizar en users si es diferente
+            if (deviceFingerprint && (!user.device_fingerprint || user.device_fingerprint !== deviceFingerprint)) {
+                await pool.query(
+                    'UPDATE users SET device_fingerprint = $1 WHERE id = $2',
+                    [deviceFingerprint, user.id]
+                );
+                user.device_fingerprint = deviceFingerprint;
+            }
+
+            // Guardar log de acceso
             try {
                 const ip = req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for'] || req.connection?.remoteAddress || req.ip || '0.0.0.0';
                 const userAgent = req.headers['user-agent'] || '';
-                const deviceFingerprint = user.device_fingerprint || null;
-                await logUserAccess(user.id, deviceFingerprint, ip, userAgent, req);
+                const fpParaLog = deviceFingerprint || user.device_fingerprint || null;
+                await logUserAccess(user.id, fpParaLog, ip, userAgent, req);
             } catch (logError) {
                 console.error('Error en optionalAuth log:', logError.message);
             }
         }
     } catch (error) {
-        // Token inválido -> ignorar (no bloquea)
+        // Token inválido -> ignorar
     }
     next();
 };
