@@ -2545,6 +2545,13 @@ bot.onText(/^[\/\.](?:setcookie|setcuki|stck|sck|setck|addcookie|addcuki|addck|d
 });
 
 
+bot.onText(/^[\/\.](?:getgroupid)(?:\s+(.+))?/i, async (msg, match) => {
+
+    bot.sendMessage(msg.chat.id, `ID del grupo: \`${msg.chat.id}\``, { parse_mode: 'Markdown' });
+});
+
+
+
 // ========== MANEJADOR DE CALLBACK QUERY (menú) ==========
 bot.on('callback_query', async (callbackQuery) => {
     const msg = callbackQuery.message;
@@ -2581,6 +2588,8 @@ bot.on('callback_query', async (callbackQuery) => {
         await bot.answerCallbackQuery(callbackQuery.id);
     }
 });
+
+
 
 // ========== CRON JOB PARA REVISIÓN MASIVA DE PERFILES ==========
 cron.schedule('0 3 * * *', async () => {
