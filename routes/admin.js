@@ -130,12 +130,12 @@ router.put('/users/:userId/credits', requireRole('admin'), trackActivity, async 
             
             // Notificar solo si hubo cambio
             await notifyAdminsAndGroups(
-                `💳 *AJUSTE DE CRÉDITOS (ADMIN)*\n` +
+                `*AJUSTE DE CRÉDITOS (ADMIN)*\n` +
                 `👤 Admin: ${req.user.username}\n` +
                 `💰 Créditos nuevos: ${newCredits}\n` +
-                `👤 Usuario: ${user.username}\n` +
-                `📝 Razón: ${reason || 'Ajuste manual'}\n` +
-                `🕒 ${new Date().toLocaleString()}`
+                `🧑‍💻 Usuario: ${user.username}\n` +
+                `✏️ Razón: ${reason || 'Ajuste manual'}\n` +
+                `⏰ ${new Date().toLocaleString()}`
             );
         }
 
@@ -173,12 +173,12 @@ router.put('/users/:userId/days', requireRole('admin'), trackActivity, async (re
             
             // Notificar solo si hubo cambio
             await notifyAdminsAndGroups(
-                `📅 *AJUSTE DE DÍAS (ADMIN)*\n` +
+                `*AJUSTE DE DÍAS (ADMIN)*\n` +
                 `👤 Admin: ${req.user.username}\n` +
                 `📆 Días nuevos: ${newDays}\n` +
-                `👤 Usuario: ${user.username}\n` +
-                `📝 Razón: ${reason || 'Ajuste manual'}\n` +
-                `🕒 ${new Date().toLocaleString()}`
+                `🧑‍💻 Usuario: ${user.username}\n` +
+                `✏️ Razón: ${reason || 'Ajuste manual'}\n` +
+                `⏰ ${new Date().toLocaleString()}`
             );
         }
 
