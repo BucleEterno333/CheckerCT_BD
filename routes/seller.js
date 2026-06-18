@@ -27,14 +27,14 @@ router.post('/add-credits', requireRole('seller', 'admin'), trackActivity, async
         if (!targetUser || targetUser.role !== 'user') return res.status(400).json({ success: false, error: 'Solo puedes añadir a usuarios normales' });
         const result = await User.addCreditsOrDays(req.user.id, user_id, 'credits', parseInt(amount), reason);
         // Notificar a administradores
-        await notifyAdminsAndGroups(
-            `💳 *TRANSACCIÓN DE CRÉDITOS*\n` +
-            `👤 Seller: ${req.user.username}\n` +
-            `💰 Créditos otorgados: ${amount}\n` +
-            `👤 Destinatario: ${result.username}\n` +
-            `📝 Razón: ${reason || 'Sin especificar'}\n` +
-            `🕒 ${new Date().toLocaleString()}`
-        );
+            await notifyAdminsAndGroups(
+                `*AJUSTE DE CRÉDITOS (SELLER)*\n` +
+                `👤 Seller: ${req.user.username}\n` +
+                `💰 Créditos nuevos: ${newCredits}\n` +
+                `🧑‍💻 Usuario: ${user.username}\n` +
+                `✏️ Razón: ${reason || 'Ajuste manual'}\n` +
+                `⏰ ${new Date().toLocaleString()}`
+            );
         res.json({ success: true, message: `Se añadieron ${amount} créditos a ${result.username}` });
     } catch (error) { res.status(500).json({ success: false, error: error.message }); }
 });
@@ -49,12 +49,12 @@ router.post('/add-days', requireRole('seller', 'admin'), trackActivity, async (r
         const result = await User.addCreditsOrDays(req.user.id, user_id, 'days', parseInt(amount), reason);
         // Notificar a administradores
             await notifyAdminsAndGroups(
-                `💳 *TRANSACCIÓN DE DÍAS*\n` +
+                `*AJUSTE DE DÍAS (SELLER)*\n` +
                 `👤 Seller: ${req.user.username}\n` +
                 `💰 Días otorgados: ${amount}\n` +
-                `👤 Destinatario: ${result.username}\n` +
-                `📝 Razón: ${reason || 'Sin especificar'}\n` +
-                `🕒 ${new Date().toLocaleString()}`
+                `🧑‍💻 Usuario: ${result.username}\n` +
+                `✏️ Razón: ${reason || 'Ajuste manual'}\n` +
+                `⏰ ${new Date().toLocaleString()}`
             );
         res.json({ success: true, message: `Se añadieron ${amount} días a ${result.username}` });
     } catch (error) { res.status(500).json({ success: false, error: error.message }); }

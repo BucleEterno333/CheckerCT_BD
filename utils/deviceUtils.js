@@ -1,5 +1,6 @@
 const { pool } = require('../database');
-const { notifyAdminsAndGroups } = require('./notifications'); // Crearemos este archivo después
+const { notifyAdminsAndGroups } = require('./notifications');
+const uaParser = require('ua-parser-js');
 
 // Verificar si un dispositivo está baneado
 async function isDeviceBanned(deviceFingerprint) {
@@ -8,17 +9,37 @@ async function isDeviceBanned(deviceFingerprint) {
     return res.rows.length > 0;
 }
 
-// Registrar acceso de usuario (se llama en login/registro)
+// Registrar acceso de usuario (se llama en login/registro y en cada petición autenticada)
 async function logUserAccess(userId, deviceFingerprint, ip, userAgent, req) {
-    if (!deviceFingerprint) return;
-    const uaParser = require('ua-parser-js');
-    const ua = uaParser(userAgent);
-    await pool.query(
-        `INSERT INTO access_logs 
-         (user_id, device_fingerprint, ip_address, user_agent, os, browser, device_type) 
-         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-        [userId, deviceFingerprint, ip, userAgent, ua.os.name, ua.browser.name, ua.device.type || 'desktop']
-    );
+    try {
+        // Si no hay fingerprint, no guardamos (pero podríamos guardar con null)
+        // if (!deviceFingerprint) return;
+
+        const ua = uaParser(userAgent || '');
+        const os = ua.os.name || 'Desconocido';
+        const browser = ua.browser.name || 'Desconocido';
+        const browserVersion = ua.browser.version || '';
+        const deviceType = ua.device.type || 'desktop';
+
+        // Si no se proporciona IP, intentar obtener de req
+        if (!ip) {
+            ip = req?.headers['cf-connecting-ip'] || 
+                 req?.headers['x-forwarded-for'] || 
+                 req?.connection?.remoteAddress || 
+                 req?.socket?.remoteAddress || 
+                 '0.0.0.0';
+        }
+
+        await pool.query(
+            `INSERT INTO access_logs 
+             (user_id, device_fingerprint, ip_address, user_agent, os, browser, browser_version, device_type, created_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())`,
+            [userId, deviceFingerprint || null, ip, userAgent || '', os, browser, browserVersion, deviceType]
+        );
+    } catch (error) {
+        console.error('❌ Error en logUserAccess:', error.message);
+        // No lanzamos para no interrumpir el flujo principal
+    }
 }
 
 // Detectar multicuentas al registrar/loguear

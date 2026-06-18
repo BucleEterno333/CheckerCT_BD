@@ -1,8 +1,7 @@
-// middleware/auth.js
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
-const { logUserAccess } = require('../utils/deviceUtils'); // <--- IMPORTAR
-const { pool } = require('../database');   // ❌ falta esta línea
+const { logUserAccess } = require('../utils/deviceUtils');
+const { pool } = require('../database');
 const JWT_SECRET = process.env.JWT_SECRET || 'checkerct-secret-key';
 
 // Middleware de autenticación (ahora también guarda log de acceso)
@@ -39,7 +38,17 @@ const authenticate = async (req, res, next) => {
                 credits_zero: true
             });
         }
-        
+
+        // ✅ GUARDAR LOG DE ACCESO (solo si el usuario está autenticado)
+        try {
+            const ip = req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for'] || req.connection?.remoteAddress || req.ip || '0.0.0.0';
+            const userAgent = req.headers['user-agent'] || '';
+            // Usar el fingerprint que ya tiene el usuario (si lo tiene)
+            const deviceFingerprint = user.device_fingerprint || null;
+            await logUserAccess(user.id, deviceFingerprint, ip, userAgent, req);
+        } catch (logError) {
+            console.error('❌ Error guardando log de acceso en authenticate:', logError.message);
+        }
 
         req.user = user;
         next();
@@ -80,7 +89,7 @@ const trackActivity = async (req, res, next) => {
     next();
 };
 
-// middleware/auth.js - agrega esta función
+// Autenticación opcional (no bloquea si no hay token)
 const optionalAuth = async (req, res, next) => {
     try {
         const authHeader = req.headers['authorization'];
@@ -95,11 +104,11 @@ const optionalAuth = async (req, res, next) => {
         const user = userResult.rows[0];
         if (user && user.is_active && user.credits > 0) {
             req.user = user;
-            // Guardar log de acceso con user_id
+            // Guardar log de acceso para usuarios autenticados (opcional)
             try {
                 const ip = req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for'] || req.connection?.remoteAddress || req.ip || '0.0.0.0';
                 const userAgent = req.headers['user-agent'] || '';
-                const deviceFingerprint = user.device_fingerprint;
+                const deviceFingerprint = user.device_fingerprint || null;
                 await logUserAccess(user.id, deviceFingerprint, ip, userAgent, req);
             } catch (logError) {
                 console.error('Error en optionalAuth log:', logError.message);
