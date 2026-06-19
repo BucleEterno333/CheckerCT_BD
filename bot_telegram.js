@@ -620,59 +620,116 @@ async function verificarTarjetaConReintentos(card, cookie, maxReintentos = 2) {
 }
 
 // ========== VERIFICACIÓN CON PROGRESO UNIFICADO ==========
+// ========== VERIFICACIÓN CON PROGRESO UNIFICADO (CON REINTENTOS Y CANCELACIÓN) ==========
 async function verificarTarjetasConProgreso(chatId, telegramId, cookie, tarjetas) {
     const total = tarjetas.length;
-    const resultados = []; // Array para almacenar el estado de cada tarjeta
+    const resultados = [];
     let username = null;
     let progressMsg = null;
+    let procesoCancelado = false;
+    let stats = { lives: 0, deads: 0, errors: 0 };
 
-    // Obtener username del usuario
     if (telegramId) {
         const userRes = await pool.query('SELECT username FROM users WHERE telegram_id = $1', [telegramId]);
         if (userRes.rows.length > 0) username = userRes.rows[0].username;
     }
 
+    // Función para construir el texto del mensaje de progreso (con o sin tarjeta actual)
+    function buildProgressMessage(tarjetaActual = null, cancelado = false) {
+        const separador = SEPARATORS[0];
+        let text = `📊 *Resultados de chequeo*\n🔍 Progreso: ${resultados.length}/${total}\n`;
+        for (const r of resultados) {
+            text += `${separador}\n`;
+            text += `• Card: \`${r.card}\`\n`;
+            text += `• Status: ${r.status}\n`;
+        }
+        if (cancelado) {
+            // Si se canceló por cookie expirada, mostrar resumen final y no mostrar tarjeta actual
+            text += `${separador}\n`;
+            text += `⛔️ *Chequeo finalizado por cookie expirada*\n`;
+            text += `💚 Lives: ${stats.lives}\n`;
+            text += `❌ Dead: ${stats.deads}\n`;
+            text += `⚠️ Errors: ${stats.errors}\n`;
+            return text;
+        }
+        if (tarjetaActual) {
+            text += `${separador}\n`;
+            text += `• Card: \`${tarjetaActual}\`\n`;
+            text += `• Status: Verificando 🔍\n`;
+        }
+        return text;
+    }
 
-
-    // Enviar mensaje inicial
-    const initialText = buildProgressMessage([], total, tarjetas[0]);
+    // Enviar mensaje inicial con la primera tarjeta
+    const initialText = buildProgressMessage(tarjetas[0]);
     progressMsg = await sendSafeMessage(chatId, initialText, { parse_mode: 'Markdown' });
-    if (!progressMsg) return; // Si falla el envío, salir
+    if (!progressMsg) return;
 
     // Recorrer cada tarjeta
     for (let i = 0; i < total; i++) {
         const card = tarjetas[i];
-        // Actualizar mensaje mostrando la tarjeta actual como "Verificando"
-        const currentText = buildProgressMessage(resultados, total, tarjetas[i]);
-        try {
-            await bot.editMessageText(currentText, {
-                chat_id: chatId,
-                message_id: progressMsg.message_id,
-                parse_mode: 'Markdown'
-            });
-        } catch (e) { /* ignora errores de edición */ }
 
-        // Verificar la tarjeta
-        const resultado = await verificarTarjetaConReintentos(card, cookie, 2);
+        // Verificar con cookie actual
+        let resultado = await verificarTarjetaConReintentos(card, cookie, 2);
 
-        // Manejar si la cookie expiró
+        // Si la cookie expiró o cuenta baneada, cancelar proceso
         if (resultado.isBanned) {
-            // Agregar resultado con estado de error y romper bucle
+            // Agregar la tarjeta actual como error por cookie expirada
             resultados.push({
                 card: card,
-                status: `⛔ Error (cookie expirada)`
+                status: '⛔️ Error (cookie expirada)'
             });
-            const finalText = buildProgressMessage(resultados, total, tarjetas[i + 1] || null);
+            // Mostrar mensaje de cancelación con resumen
+            const finalText = buildProgressMessage(null, true);
             try {
-                await bot.editMessageText(finalText, {
-                    chat_id: chatId,
-                    message_id: progressMsg.message_id,
-                    parse_mode: 'Markdown'
-                });
+                await bot.editMessageText(finalText, { chat_id: chatId, message_id: progressMsg.message_id, parse_mode: 'Markdown' });
             } catch (e) {}
-            await sendSafeMessage(chatId, `⛔ Cookie expirada en tarjeta ${i+1}. Proceso cancelado.`);
-            return; // Terminar
+            // No enviamos mensaje extra, todo queda en el mismo mensaje
+            procesoCancelado = true;
+            break;
         }
+
+        // Si es un error (no LIVE/DEAD) y no es baneo, reintentar una vez
+        if (resultado.status !== 'LIVE' && resultado.status !== 'DEAD') {
+            // Mostrar "ERROR - Reintentando chequeo"
+            resultados.push({
+                card: card,
+                status: 'ERROR - Reintentando chequeo ⚠️'
+            });
+            const textoReintento = buildProgressMessage(null);
+            try {
+                await bot.editMessageText(textoReintento, { chat_id: chatId, message_id: progressMsg.message_id, parse_mode: 'Markdown' });
+            } catch (e) {}
+
+            // Reintentar una vez con la misma cookie
+            const reintento = await verificarTarjetaConReintentos(card, cookie, 2);
+            if (reintento.isBanned) {
+                // Si el reintento da cookie expirada, cancelar
+                resultados.pop(); // quitar el "Reintentando"
+                resultados.push({
+                    card: card,
+                    status: '⛔️ Error (cookie expirada)'
+                });
+                const finalText = buildProgressMessage(null, true);
+                try {
+                    await bot.editMessageText(finalText, { chat_id: chatId, message_id: progressMsg.message_id, parse_mode: 'Markdown' });
+                } catch (e) {}
+                procesoCancelado = true;
+                break;
+            }
+            // Si el reintento da LIVE o DEAD, usamos ese resultado
+            if (reintento.status === 'LIVE' || reintento.status === 'DEAD') {
+                resultado = reintento;
+            } else {
+                // Si sigue en error, mantener el error
+                resultado = reintento;
+            }
+        }
+
+        // Actualizar estadísticas
+        if (resultado.status === 'LIVE') stats.lives++;
+        else if (resultado.status === 'DEAD') stats.deads++;
+        else stats.errors++;
 
         // Guardar live si es LIVE
         if (resultado.status === 'LIVE' && username) {
@@ -691,11 +748,11 @@ async function verificarTarjetasConProgreso(chatId, telegramId, cookie, tarjetas
             }
         }
 
-        // Determinar emoji final
+        // Determinar estado a mostrar
         let statusDisplay = '';
         if (resultado.status === 'LIVE') statusDisplay = 'LIVE ✅';
         else if (resultado.status === 'DEAD') statusDisplay = 'DEAD ❌';
-        else if (resultado.isBanned) statusDisplay = 'ERROR (cookie expirada) ⛔';
+        else if (resultado.isBanned) statusDisplay = '⛔️ Error (cookie expirada)';
         else if (resultado.status === 'ERROR') {
             const msgLower = (resultado.message || '').toLowerCase();
             if (msgLower.includes('wallet') || msgLower.includes('amazonwallet')) {
@@ -707,27 +764,32 @@ async function verificarTarjetasConProgreso(chatId, telegramId, cookie, tarjetas
             statusDisplay = `ERROR ⚠️`;
         }
 
-        // Guardar resultado
-        resultados.push({
-            card: card,
-            status: statusDisplay
-        });
+        // Actualizar el resultado final (reemplazar el "Reintentando" si existía)
+        const existingIndex = resultados.findIndex(r => r.card === card);
+        if (existingIndex !== -1) {
+            resultados[existingIndex].status = statusDisplay;
+        } else {
+            resultados.push({ card, status: statusDisplay });
+        }
 
-        // Editar mensaje con el resultado actualizado
-        const updatedText = buildProgressMessage(resultados, total, tarjetas[i + 1] || null);
+        // Actualizar mensaje de progreso con la siguiente tarjeta (si existe)
+        const nextCard = (i + 1 < total && !procesoCancelado) ? tarjetas[i + 1] : null;
+        const nuevoTexto = buildProgressMessage(nextCard);
         try {
-            await bot.editMessageText(updatedText, {
-                chat_id: chatId,
-                message_id: progressMsg.message_id,
-                parse_mode: 'Markdown'
-            });
+            await bot.editMessageText(nuevoTexto, { chat_id: chatId, message_id: progressMsg.message_id, parse_mode: 'Markdown' });
         } catch (e) {}
-
-        // Pequeña pausa entre tarjetas
         await new Promise(r => setTimeout(r, 800));
     }
 
-    // Mensaje final (opcional, pero ya está completo)
+    // Si no se canceló, mostrar un mensaje final (opcional, pero el progreso ya está completo)
+    if (!procesoCancelado) {
+        // No es necesario enviar otro mensaje, el progreso ya muestra todo
+        // Pero podemos actualizar el mensaje para que no quede "Verificando" si terminó
+        const finalText = buildProgressMessage(null);
+        try {
+            await bot.editMessageText(finalText, { chat_id: chatId, message_id: progressMsg.message_id, parse_mode: 'Markdown' });
+        } catch (e) {}
+    }
 }
 
 
