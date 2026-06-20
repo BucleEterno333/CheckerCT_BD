@@ -22,8 +22,8 @@ const pool = new Pool({
 
 const INTERNAL_API_URL = process.env.INTERNAL_API_URL || 'http://basedatos:8080/api';
 const BOT_API_KEY = process.env.BOT_API_KEY || 'AALOL23894238HWKEJSNFSDGF';
-const API_GENCOOKIE_URL = process.env.API_GENCOOKIE_URL || 'https://p01--gencookie--7ppzd7xy487n.code.run';
-const API_EXTRAPOLADOR_URL = process.env.API_EXTRAPOLADOR_URL || 'https://p01--extrapolador--7ppzd7xy487n.code.run';
+const API_GENCOOKIE_URL = process.env.API_GENCOOKIE_URL || 'https://p01--gencookie--7cbg5vtd5k4l.code.ru';
+const API_EXTRAPOLADOR_URL = process.env.API_EXTRAPOLADOR_URL || 'https://p01--extrapolador--7cbg5vtd5k4l.code.run';
 const API_AMAZON_CHECK_URL = process.env.API_AMAZON_CHECK_URL || 'https://p01--amazonchk--vwr6mdxp7dhn.code.run/api/check-card';
 const API_LATTICE_URL = process.env.API_LATTICE_URL || 'https://api.lattice.com/check';
 const GROUP_CHAT_ID = process.env.GROUP_CHAT_ID;
