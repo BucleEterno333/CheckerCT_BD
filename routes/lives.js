@@ -75,23 +75,24 @@ router.get('/', async (req, res) => {
     }
 });
 
-
-router.get('/bins/stats', async (req, res) => {
+// ========== ESTADÍSTICAS DE BINs PARA EL BUSCADOR ==========
+router.get('/bins/stats', authenticate, async (req, res) => {
     try {
+        const userId = req.user.id;
         const result = await pool.query(
             `SELECT card_bin, COUNT(*) as count 
              FROM user_lives 
              WHERE user_id = $1 
              GROUP BY card_bin 
              ORDER BY count DESC`,
-            [req.user.id]
+            [userId]
         );
         res.json({ success: true, bins: result.rows });
     } catch (error) {
+        console.error('Error obteniendo estadísticas de bins:', error);
         res.status(500).json({ success: false, error: error.message });
     }
 });
-
 // ========== CREAR LIVE ==========
 router.post('/', trackActivity, async (req, res) => {
     try {
