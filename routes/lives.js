@@ -5,6 +5,7 @@ const { authenticate, requireRole, trackActivity } = require('../middleware/auth
 const Live = require('../models/Live');
 const Account = require('../models/UserAccount');
 const Contact = require('../models/Contact');
+const { upsertLive } = require('../models/UserLive');
 const { bot } = require('../bot_telegram');
 const { pool } = require('../database');
 const { sendSafeMessage } = require('../bot_telegram');
