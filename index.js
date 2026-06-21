@@ -82,6 +82,8 @@ const userPagesRouter = require('./routes/user-pages');
 const accountActionsRouter = require('./routes/account-actions');
 const devicesRouter = require('./routes/devices');
 const settingsRoutes = require('./routes/settings');
+const gencookieRoutes = require('./routes/gencookie');
+
 
 // Montar rutas
 app.use('/api/settings', settingsRoutes);
@@ -103,7 +105,7 @@ app.use('/api/contacts', contactsRoutes);
 app.use('/api/user-accounts', userAccountsRoutes);
 app.use('/api/user-responses', userResponsesRoutes);
 app.use('/api/user-pages', userPagesRouter);
-
+app.use('/api/gencookie', gencookieRoutes);
 // ========== INICIO DEL SERVIDOR ==========
 const startServer = async () => {
     try {

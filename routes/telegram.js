@@ -153,7 +153,7 @@ function formatearMensajeTelegram(card, result) {
     }
     
     mensaje += `\n⏰ <b>Hora:</b> ${new Date().toLocaleString()}\n`;
-    mensaje += `🛒 <b>Gate:</b> Amazon CHK\n`;
+    mensaje += `🛒 <b>Gate:</b> Amazon \n`;
     mensaje += `\n━━━━━━━━━━━━━━━━━━━\n`;
     mensaje += `@AstralCHK_Bot`;
     
