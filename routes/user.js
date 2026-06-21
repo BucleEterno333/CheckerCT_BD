@@ -3,7 +3,7 @@ const router = express.Router();
 const { authenticate } = require('../middleware/auth');
 const User = require('../models/User');
 const { pool } = require('../database');
-const { logUserAccess } = require('../utils/deviceUtils');
+const { logUserAccess, detectMulticuentas } = require('../utils/deviceUtils');
 const BOT_API_KEY = process.env.BOT_API_KEY || 'AALOL23894238HWKEJSNFSDGF';
 
 // ========== RUTAS PÚBLICAS PARA EL BOT ==========

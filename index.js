@@ -29,7 +29,16 @@ const corsOptions = {
     optionsSuccessStatus: 200
 };
 
-app.use(cors(corsOptions));
+app.use((req, res, next) => {
+    res.header('Access-Control-Allow-Origin', 'https://astralchk.com');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Device-Fingerprint');
+    res.header('Access-Control-Allow-Credentials', 'true');
+    if (req.method === 'OPTIONS') {
+        return res.sendStatus(200);
+    }
+    next();
+});
 
 // Asegurar que OPTIONS también responda
 app.options('*', cors(corsOptions));
@@ -89,6 +98,7 @@ const userPagesRouter = require('./routes/user-pages');
 const accountActionsRouter = require('./routes/account-actions');
 const devicesRouter = require('./routes/devices');
 const settingsRoutes = require('./routes/settings');
+
 
 app.use('/api/settings', settingsRoutes);
 app.use('/api/devices', devicesRouter);
