@@ -120,30 +120,24 @@ router.get('/cookie-count', async (req, res) => {
     }
 });
 
-// NUEVO ENDPOINT: Asociar fingerprint a usuario logueado
+// ========== ASOCIAR FINGERPRINT ==========
 router.post('/associate-fingerprint', authenticate, async (req, res) => {
     const { device_fingerprint } = req.body;
     if (!device_fingerprint) {
         return res.status(400).json({ success: false, error: 'Fingerprint requerido' });
     }
     try {
-        // 1. Actualizar el fingerprint del usuario en la tabla users
         await pool.query(
             'UPDATE users SET device_fingerprint = $1 WHERE id = $2',
             [device_fingerprint, req.user.id]
         );
-
-        // 2. Guardar el log de acceso (con el fingerprint asociado)
         const ip = req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for'] || req.connection?.remoteAddress || '0.0.0.0';
         const userAgent = req.headers['user-agent'] || '';
         await logUserAccess(req.user.id, device_fingerprint, ip, userAgent, req);
-
-        // 3. (Opcional) Detectar multicuentas con este fingerprint
         const multicuentas = await detectMulticuentas(device_fingerprint, req.user.id, req.user.username);
         if (multicuentas) {
             console.log(`⚠️ Multicuentas detectadas para ${req.user.username}:`, multicuentas.length);
         }
-
         res.json({ success: true, message: 'Fingerprint asociado correctamente' });
     } catch (err) {
         console.error('Error asociando fingerprint:', err.message);
@@ -151,7 +145,7 @@ router.post('/associate-fingerprint', authenticate, async (req, res) => {
     }
 });
 
-
+// ========== OBTENER TODOS LOS USUARIOS (para datalist) ==========
 router.get('/users/all', authenticate, async (req, res) => {
     try {
         const result = await pool.query(

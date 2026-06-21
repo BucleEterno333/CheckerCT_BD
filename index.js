@@ -2,21 +2,17 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const { pool, initDatabase } = require('./database');
-
-const app = express();
-
-const PORT = process.env.PORT || 8080; 
-const cron = require('node-cron');
-const { sendSafeMessage } = require('./bot_telegram');
 const { optionalAuth } = require('./middleware/auth');
 
-// Configuración CORS
+const app = express();
+const PORT = process.env.PORT || 8080;
+
+// ========== CONFIGURACIÓN CORS (CORREGIDA) ==========
 const corsOptions = {
     origin: [
-        'https://astralchk.com',       // tu dominio
-        'http://localhost:3000',       // desarrollo local
-        'http://127.0.0.1:5500',       // Live Server
-        /\.astralchk\.com$/            // subdominios
+        'https://astralchk.com',
+        'http://localhost:3000',
+        'http://127.0.0.1:5500'
     ],
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: [
@@ -29,23 +25,20 @@ const corsOptions = {
     optionsSuccessStatus: 200
 };
 
-
-
-// Asegurar que OPTIONS también responda
+// ✅ APLICAR CORS A TODAS LAS RUTAS
+app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 
-// 2. Parseo de JSON (IMPORTANTE: ANTES de las rutas)
+// ========== MIDDLEWARES DE PARSEO ==========
 app.use(express.json());
-app.use(optionalAuth);   // <-- Aquí
-
 app.use(express.urlencoded({ extended: true }));
 
+// ========== MIDDLEWARE DE AUTENTICACIÓN OPCIONAL ==========
+app.use(optionalAuth);
 
-
-
-// RUTA RAIZ - IMPORTANTE
+// ========== RUTA RAIZ ==========
 app.get('/', (req, res) => {
-    res.json({ 
+    res.json({
         message: 'CheckerCT API - Running',
         timestamp: new Date().toISOString(),
         endpoints: [
@@ -59,9 +52,9 @@ app.get('/', (req, res) => {
     });
 });
 
-// Health check
+// ========== HEALTH CHECK ==========
 app.get('/api/health', async (req, res) => {
-    res.json({ 
+    res.json({
         status: 'healthy',
         service: 'checkerct-api',
         timestamp: new Date().toISOString(),
@@ -69,14 +62,14 @@ app.get('/api/health', async (req, res) => {
     });
 });
 
-// Importar y usar rutas
+// ========== RUTAS ==========
 const authRoutes = require('./routes/auth');
 const adminRoutes = require('./routes/admin');
 const sellerRoutes = require('./routes/seller');
 const livesRoutes = require('./routes/lives');
 const accountsRoutes = require('./routes/accounts');
 const telegramRoutes = require('./routes/telegram');
-const userRoutes = require ('./routes/user')
+const userRoutes = require('./routes/user');
 const contactsRoutes = require('./routes/contacts');
 const userAccountsRoutes = require('./routes/user-accounts');
 const userResponsesRoutes = require('./routes/user-responses');
@@ -90,7 +83,7 @@ const accountActionsRouter = require('./routes/account-actions');
 const devicesRouter = require('./routes/devices');
 const settingsRoutes = require('./routes/settings');
 
-
+// Montar rutas
 app.use('/api/settings', settingsRoutes);
 app.use('/api/devices', devicesRouter);
 app.use('/api/accounts', accountActionsRouter);
@@ -104,26 +97,24 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/seller', sellerRoutes);
 app.use('/api/lives', livesRoutes);
 app.use('/api/accounts', accountsRoutes);
-app.use('/api/telegram', telegramRoutes); 
-app.use('/api/user', userRoutes);
+app.use('/api/telegram', telegramRoutes);
+app.use('/api/user', userRoutes); // <-- RUTAS DE USUARIO (incluye /users/all)
 app.use('/api/contacts', contactsRoutes);
 app.use('/api/user-accounts', userAccountsRoutes);
 app.use('/api/user-responses', userResponsesRoutes);
 app.use('/api/user-pages', userPagesRouter);
 
-
-
-// Inicializar servidor
+// ========== INICIO DEL SERVIDOR ==========
 const startServer = async () => {
     try {
         console.log('🔄 Inicializando base de datos...');
         await initDatabase();
         console.log('✅ Base de datos lista');
 
-        // INICIAR BOT DE TELEGRAM
+        // Iniciar bot de Telegram
         const { bot } = require('./bot_telegram');
         console.log('🤖 Bot de Telegram listo para recibir /start');
-        
+
         app.listen(PORT, '0.0.0.0', () => {
             console.log(`🚀 API CheckerCT ejecutándose en http://0.0.0.0:${PORT}`);
             console.log(`🌐 Públicamente en: https://site--checkerct--slm72jkyf6vq.code.run`);
@@ -136,7 +127,6 @@ const startServer = async () => {
         process.exit(1);
     }
 };
-
 
 console.log('⏰ Tarea programada: restar 1 día a las 12:01 AM (hora CDMX)');
 
