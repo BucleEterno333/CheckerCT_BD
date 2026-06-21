@@ -78,31 +78,48 @@ router.get('/', async (req, res) => {
 // ========== CREAR LIVE ==========
 router.post('/', trackActivity, async (req, res) => {
     try {
-        let { card_full, gate_name, check_date, notes } = req.body;
+        let { card_full, gate_name, check_date, notes, bank_name, country, network, card_class } = req.body;
         if (!card_full || !gate_name) {
             return res.status(400).json({ success: false, error: 'card_full y gate_name son requeridos' });
         }
 
-        // Normalizar el bank_name si viene en el cuerpo (aunque normalmente no viene al crear)
-        if (req.body.bank_name) req.body.bank_name = normalizeBankName(req.body.bank_name);
+        const cardData = {
+            card_full,
+            card_type: req.body.card_type || 'CCS'
+        };
 
-        const live = await Live.create(req.user.id, { card_full, gate_name, check_date, notes });
-        
-        // Si la creación devolvió bank_name, normalizarlo en la respuesta
-        if (live.bank_name) live.bank_name = normalizeBankName(live.bank_name);
+        // Normalizar si vienen
+        if (bank_name) bank_name = normalizeBankName(bank_name);
 
-        await Live.addAction({
-            live_id: live.id,
-            user_id: req.user.id,
-            action_type: 'live_obtained',
-            page_name: gate_name,
-            action_date: check_date || new Date().toISOString().split('T')[0],
-            notes: `Live obtenida de ${gate_name}`
+        // Usar upsertLive en lugar de Live.create
+        const result = await upsertLive(
+            req.user.id,
+            cardData,
+            gate_name,
+            null, // checkerId
+            bank_name || null,
+            country || null,
+            network || null,
+            card_class || null
+        );
+
+        // Obtener la live recién insertada/actualizada para devolverla
+        const live = await pool.query(
+            'SELECT * FROM user_lives WHERE id = $1',
+            [result.liveId]
+        );
+
+        if (live.rows[0] && live.rows[0].bank_name) {
+            live.rows[0].bank_name = normalizeBankName(live.rows[0].bank_name);
+        }
+
+        res.json({ 
+            success: true, 
+            live: live.rows[0], 
+            message: result.wasUpdated ? 'Live actualizada' : 'Live creada exitosamente' 
         });
-
-        res.json({ success: true, live, message: 'Live creada exitosamente' });
     } catch (error) {
-        console.error('Error creando live:', error);
+        console.error('Error guardando live:', error);
         res.status(500).json({ success: false, error: error.message });
     }
 });

@@ -29,6 +29,104 @@ class Live {
         return result.rows[0];
     }
 
+
+    // models/UserLive.js
+
+    static async upsertLive(userId, cardData, gateName, checkerId = null, bankName = null, country = null, network = null, cardClass = null) {
+        const client = await pool.connect();
+        try {
+            await client.query('BEGIN');
+
+            // 1. Buscar si ya existe
+            const existing = await client.query(
+                `SELECT id, status FROM user_lives 
+                WHERE user_id = $1 AND card_full = $2`,
+                [userId, cardData.card_full]
+            );
+
+            let liveId;
+            let wasUpdated = false;
+
+            if (existing.rows.length > 0) {
+                // Existe -> actualizar
+                const live = existing.rows[0];
+                liveId = live.id;
+                const oldStatus = live.status;
+
+                // Solo actualizar si no estaba LIVE
+                if (oldStatus !== 'live') {
+                    await client.query(
+                        `UPDATE user_lives 
+                        SET status = 'live', 
+                            updated_at = NOW(), 
+                            check_date = CURRENT_DATE,
+                            check_time = NOW(),
+                            gate_name = COALESCE($1, gate_name),
+                            bank_name = COALESCE($2, bank_name),
+                            country = COALESCE($3, country),
+                            network = COALESCE($4, network),
+                            card_class = COALESCE($5, card_class)
+                        WHERE id = $6`,
+                        [gateName, bankName, country, network, cardClass, liveId]
+                    );
+                    wasUpdated = true;
+                } else {
+                    // Ya estaba LIVE, solo actualizar timestamp para subir al tope
+                    await client.query(
+                        `UPDATE user_lives 
+                        SET updated_at = NOW(), check_time = NOW()
+                        WHERE id = $1`,
+                        [liveId]
+                    );
+                    wasUpdated = false; // no necesita acción de rechequeo
+                }
+            } else {
+                // No existe -> insertar
+                const result = await client.query(
+                    `INSERT INTO user_lives 
+                    (user_id, card_full, card_last_four, card_bin, card_type, 
+                    bank_name, country, gate_name, check_date, check_time, status, phase,
+                    network, card_class, created_at, updated_at)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_DATE, NOW(), 'live', 'pending', $9, $10, NOW(), NOW())
+                    RETURNING id`,
+                    [
+                        userId,
+                        cardData.card_full,
+                        cardData.card_full.slice(-4),
+                        cardData.card_full.slice(0, 6),
+                        cardData.card_type || 'CCS',
+                        bankName,
+                        country,
+                        gateName,
+                        network,
+                        cardClass
+                    ]
+                );
+                liveId = result.rows[0].id;
+                wasUpdated = true; // para insertar acción
+            }
+
+            // 2. Insertar acción si fue actualizado o insertado
+            if (wasUpdated) {
+                await client.query(
+                    `INSERT INTO live_actions (live_id, action_type, notes, created_at)
+                    VALUES ($1, 'rechecked', 'Rechequeo automático - Live detectada', NOW())`,
+                    [liveId]
+                );
+            }
+
+            await client.query('COMMIT');
+            return { success: true, liveId, wasUpdated };
+        } catch (error) {
+            await client.query('ROLLBACK');
+            console.error('❌ Error en upsertLive:', error);
+            throw error;
+        } finally {
+            client.release();
+        }
+    }
+
+
     // Obtener lives de un usuario
     static async getUserLives(userId, filters = {}) {
         const { status, gate, bin, page = 1, limit = 50 } = filters;
@@ -36,8 +134,8 @@ class Live {
         
         let query = `
             SELECT ul.*, 
-                   COUNT(la.id) as action_count,
-                   MAX(la.action_date) as last_action_date
+                COUNT(la.id) as action_count,
+                MAX(la.action_date) as last_action_date
             FROM user_lives ul
             LEFT JOIN live_actions la ON ul.id = la.live_id
             WHERE ul.user_id = $1
@@ -64,7 +162,8 @@ class Live {
             paramIndex++;
         }
         
-        query += ` GROUP BY ul.id ORDER BY ul.check_date DESC LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
+        // ✅ CAMBIO AQUÍ: ordenar por updated_at (más reciente primero), luego check_date
+        query += ` GROUP BY ul.id ORDER BY ul.updated_at DESC NULLS LAST, ul.check_date DESC LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
         params.push(limit, offset);
         
         const result = await pool.query(query, params);
