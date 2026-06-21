@@ -10,26 +10,29 @@ const cron = require('node-cron');
 const { sendSafeMessage } = require('./bot_telegram');
 const { optionalAuth } = require('./middleware/auth');
 
-// Configuración de CORS mejorada
+// Configuración CORS
 const corsOptions = {
-    origin: function (origin, callback) {
-        // Permitir solicitudes desde astralchk.com y también desde el mismo origen
-        const allowedOrigins = ['https://astralchk.com', 'https://site--checkerct--slm72jkyf6vq.code.run'];
-        if (!origin || allowedOrigins.includes(origin)) {
-            callback(null, true);
-        } else {
-            callback(new Error('Origen no permitido por CORS'));
-        }
-    },
+    origin: [
+        'https://astralchk.com',       // tu dominio
+        'http://localhost:3000',       // desarrollo local
+        'http://127.0.0.1:5500',       // Live Server
+        /\.astralchk\.com$/            // subdominios
+    ],
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: [
+        'Content-Type',
+        'Authorization',
+        'X-Device-Fingerprint',
+        'x-bot-key'
+    ],
     credentials: true,
-    optionsSuccessStatus: 200,
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'X-Device-Fingerprint'],
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH']
+    optionsSuccessStatus: 200
 };
 
-// Aplica CORS a todas las rutas (incluyendo OPTIONS)
 app.use(cors(corsOptions));
-app.options('*', cors(corsOptions));  // Manejo explícito de preflight
+
+// Asegurar que OPTIONS también responda
+app.options('*', cors(corsOptions));
 
 // 2. Parseo de JSON (IMPORTANTE: ANTES de las rutas)
 app.use(express.json());

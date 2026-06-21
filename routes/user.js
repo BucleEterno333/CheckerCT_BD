@@ -151,4 +151,17 @@ router.post('/associate-fingerprint', authenticate, async (req, res) => {
     }
 });
 
+
+router.get('/users/all', authenticate, async (req, res) => {
+    try {
+        const result = await pool.query(
+            'SELECT id, username FROM users WHERE role = $1 ORDER BY username',
+            ['user']
+        );
+        res.json({ success: true, users: result.rows });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
 module.exports = router;
