@@ -18,7 +18,6 @@ const allowBot = (req, res, next) => {
     next();
 };
 router.use(allowBot);
-router.use(authenticate);
 
 const botAuth = (req, res, next) => {
     const authHeader = req.headers.authorization;
@@ -46,6 +45,9 @@ router.post('/bot/toggle-service', async (req, res) => {
     await setSetting('cookie_generator_enabled', newStatus, null);
     res.json({ success: true, enabled: newStatus });
 });
+
+router.use(authenticate);
+
 
 router.get('/service-status-for-generator', async (req, res) => {
 
