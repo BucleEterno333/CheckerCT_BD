@@ -73,7 +73,7 @@ router.post('/send-live', async (req, res) => {
 // ============================================
 // ENDPOINT 2: Guardar live en base de datos
 // ============================================
-const { upsertLive } = require('../routes/UserLive');
+const { upsertLive } = require('../modelos/UserLive');
 
 router.post('/save-live', async (req, res) => {
     try {
