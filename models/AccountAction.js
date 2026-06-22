@@ -1,91 +1,54 @@
-const { pool } = require('../database');
+const express = require('express');
+const router = express.Router();
+const { authenticate, trackActivity } = require('../middleware/auth');
+const AccountAction = require('../models/AccountAction');
 
-class AccountAction {
-    // Obtener todas las acciones de una cuenta (orden ascendente para historial)
-    static async getByAccountId(accountId, userId) {
-        const result = await pool.query(
-            `SELECT * FROM account_actions 
-             WHERE account_id = $1 AND user_id = $2 
-             ORDER BY action_date ASC, created_at ASC`,
-            [accountId, userId]
-        );
-        return result.rows;
+router.use(authenticate);
+
+router.get('/:accountId', async (req, res) => {
+    try {
+        const { accountId } = req.params;
+        const actions = await AccountAction.getByAccountId(accountId, req.user.id);
+        res.json({ success: true, actions });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ success: false, error: error.message });
     }
+});
 
-    // Crear una nueva acción
-    static async create(accountId, userId, data) {
-        const {
-            action_type,
-            action_date,
-            amount,
-            product,
-            response_text,
-            card_last4,
-            field_updated,
-            method,
-            reason,
-            result,
-            notes
-        } = data;
-
-        const query = `
-            INSERT INTO account_actions 
-            (account_id, user_id, action_type, action_date, amount, product, 
-             response_text, card_last4, field_updated, method, reason, result, notes)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-            RETURNING *
-        `;
-        const values = [
-            accountId, userId, action_type, action_date || new Date().toISOString(),
-            amount, product, response_text, card_last4, field_updated, method, reason, result, notes
-        ];
-        const queryResult = await pool.query(query, values);
-        return queryResult.rows[0];
+router.post('/:accountId', trackActivity, async (req, res) => {
+    try {
+        const { accountId } = req.params;
+        const newAction = await AccountAction.create(accountId, req.user.id, req.body);
+        res.json({ success: true, action: newAction });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ success: false, error: error.message });
     }
+});
 
-    // Actualizar una acción existente
-    static async update(actionId, userId, data) {
-        const {
-            action_date,
-            amount,
-            product,
-            response_text,
-            card_last4,
-            field_updated,
-            method,
-            reason,
-            result,
-            notes
-        } = data;
-
-        const query = `
-            UPDATE account_actions 
-            SET action_date = COALESCE($1, action_date),
-                amount = COALESCE($2, amount),
-                product = COALESCE($3, product),
-                response_text = COALESCE($4, response_text),
-                card_last4 = COALESCE($5, card_last4),
-                field_updated = COALESCE($6, field_updated),
-                method = COALESCE($7, method),
-                reason = COALESCE($8, reason),
-                result = COALESCE($9, result),
-                notes = COALESCE($10, notes)
-            WHERE id = $11 AND user_id = $12
-            RETURNING *
-        `;
-        const values = [action_date, amount, product, response_text, card_last4, field_updated, method, reason, result, notes, actionId, userId];
-        const queryResult = await pool.query(query, values);
-        return queryResult.rows[0];
+router.put('/:accountId/:actionId', trackActivity, async (req, res) => {
+    try {
+        const { actionId } = req.params;
+        const updated = await AccountAction.update(actionId, req.user.id, req.body);
+        if (!updated) return res.status(404).json({ success: false, error: 'Acción no encontrada' });
+        res.json({ success: true, action: updated });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ success: false, error: error.message });
     }
+});
 
-    // Eliminar una acción
-    static async delete(actionId, userId) {
-        const deleteResult = await pool.query(
-            'DELETE FROM account_actions WHERE id = $1 AND user_id = $2 RETURNING id',
-            [actionId, userId]
-        );
-        return deleteResult.rows.length > 0;
+router.delete('/:accountId/:actionId', async (req, res) => {
+    try {
+        const { actionId } = req.params;
+        const deleted = await AccountAction.delete(actionId, req.user.id);
+        if (!deleted) return res.status(404).json({ success: false, error: 'Acción no encontrada' });
+        res.json({ success: true, message: 'Acción eliminada' });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ success: false, error: error.message });
     }
-}
+});
 
-module.exports = AccountAction;
+module.exports = router;
