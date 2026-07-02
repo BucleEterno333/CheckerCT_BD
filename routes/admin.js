@@ -46,14 +46,16 @@ router.post('/bot/toggle-service', async (req, res) => {
     res.json({ success: true, enabled: newStatus });
 });
 
-router.use(authenticate);
-
 
 router.get('/service-status-for-generator', async (req, res) => {
 
     const enabled = await getSetting('cookie_generator_enabled', true);
     res.json({ success: true, enabled });
 });
+
+router.use(authenticate);
+
+
 
 router.get('/service-status', authenticate, async (req, res) => {
     const enabled = await getSetting('cookie_generator_enabled', true);
