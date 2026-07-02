@@ -477,7 +477,7 @@ async function findUserByUsernameOrId(identifier, requesterRole) {
 async function deductCredits(telegramId, amount = 4) {
     try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 30000);
+        const timeoutId = setTimeout(() => controller.abort(), 60000);
         const response = await fetch(`${INTERNAL_API_URL}/user/bot/use-credits`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ telegram_id: telegramId, amount, bot_key: BOT_API_KEY }),
@@ -1505,7 +1505,7 @@ function setUserState(telegramId, state) {
             userStates.delete(telegramId);
             bot.sendMessage(telegramId, '⏰ Tiempo de espera agotado.').catch(() => {});
         }
-    }, 300000);
+    }, 600000);
     userStates.set(telegramId, { ...state, timeout });
 }
 
