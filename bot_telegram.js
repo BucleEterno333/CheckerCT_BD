@@ -62,24 +62,32 @@ const bankBins = {
 
 // ========== FUNCIONES AUXILIARES ==========
 
-// ========== GENERAR COOKIE ÚNICA ==========
 async function generarCookieUnica(telegramId) {
     const globalForcePlaywright = await getGlobalForcePlaywright();
     const requestBody = { country: 'MX', add_address: true };
     if (globalForcePlaywright) requestBody.force_playwright = true;
-    const response = await fetch(`${API_GENCOOKIE_URL}/generate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(requestBody)
-    });
-    const data = await response.json();
-    if (!data.success) throw new Error('Error generando cookie');
-    await deductCredits(telegramId, 4);
-    await pool.query('UPDATE users SET cookies_generated = cookies_generated + 1 WHERE telegram_id = $1', [telegramId]);
-    return data.data.cookie_string;
+    
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 600000); // 10 MINUTOS
+    
+    try {
+        const response = await fetch(`${API_GENCOOKIE_URL}/generate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(requestBody),
+            signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+        const data = await response.json();
+        if (!data.success) throw new Error('Error generando cookie');
+        await deductCredits(telegramId, 4);
+        await pool.query('UPDATE users SET cookies_generated = cookies_generated + 1 WHERE telegram_id = $1', [telegramId]);
+        return data.data.cookie_string;
+    } catch (error) {
+        clearTimeout(timeoutId);
+        throw error;
+    }
 }
-
-
 // ========== PROCESAR UN EXTRA CON N COOKIES ==========
 async function procesarExtraConNCookies(chatId, telegramId, extra, numCookies, cantidadTarjetas = 100) {
     // 1. Generar cookies
