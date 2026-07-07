@@ -2267,19 +2267,13 @@ bot.onText(/^[\/\.]unban(?:\s+([^\s]+))?/i, async (msg, match) => {
 });
 
 // ========== COMANDOS DE EXTRAPOLACIÓN Y VERIFICACIÓN ==========
-bot.onText(/^[\/\.](?:gencookie\b|gencuki\b|genck\b|gnck\b)(?:\s+(\w+))?/i, async (msg, match) => {
+bot.onText(/^[\/\.](?:gencookie\b|gencuki\b|genck\b|gnck\b)(?:\s+\w+)?/i, async (msg, match) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
-    let country = match[1] ? match[1].toUpperCase() : null;
-    if (!country && msg.reply_to_message?.text) country = msg.reply_to_message.text.trim().toUpperCase();
-    if (!country) {
-        setUserState(telegramId, { step: 'awaiting_gencookie_country' });
-        return sendSafeMessage(chatId, '🌎 ¿País? (MX, US, CA, UK, DE, FR, IT, ES, JP, AU, IN)');
-    }
-    await handleGenCookieCommand(chatId, telegramId, country);
+    // Siempre usar México (MX)
+    await handleGenCookieCommand(chatId, telegramId, 'MX');
     clearUserState(telegramId);
 });
-
 
 bot.onText(/^[\/\.](?:amazoncookieinfinita|amzckin|amazoninfinita)(?:\s+([\s\S]+))?/i, async (msg, match) => {
     const chatId = msg.chat.id;
