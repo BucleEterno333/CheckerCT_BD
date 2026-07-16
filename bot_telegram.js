@@ -436,7 +436,7 @@ function generarTarjetasDesdePatron(patron, cantidad = 10) {
 
 async function getPatternsFromBin(chatId, bin) {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 180000);
+    const timeoutId = setTimeout(() => controller.abort(), 600000);
     const response = await fetch(`${API_EXTRAPOLADOR_URL}/api/search-bin`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ bin }), signal: controller.signal
     });
@@ -485,7 +485,7 @@ async function findUserByUsernameOrId(identifier, requesterRole) {
 async function deductCredits(telegramId, amount = 4) {
     try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 60000);
+        const timeoutId = setTimeout(() => controller.abort(), 600000);
         const response = await fetch(`${INTERNAL_API_URL}/user/bot/use-credits`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ telegram_id: telegramId, amount, bot_key: BOT_API_KEY }),
@@ -568,7 +568,7 @@ function getCommandParam(msg, commandName) {
 async function verificarTarjetaConCookie(card, cookie) {
     try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 120000);
+        const timeoutId = setTimeout(() => controller.abort(), 600000);
         const resp = await fetch(API_AMAZON_CHECK_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
