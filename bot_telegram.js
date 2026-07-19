@@ -328,9 +328,7 @@ function extractPatternsFromCards(cards) {
         const partes = tarjeta.split('|');
         if (partes.length < 3) continue;
         const numero = partes[0];
-        // Solo aceptamos 15 o 16 dígitos
         if (numero.length !== 15 && numero.length !== 16) continue;
-        // Para 15 dígitos (AMEX) tomamos primeros 11, para 16 tomamos 12
         const prefixLength = numero.length === 15 ? 11 : 12;
         const prefix = numero.slice(0, prefixLength);
         const mes = partes[1];
@@ -399,7 +397,7 @@ function calcularDigitoLuhn(numeroParcial) {
     return (10 - (suma % 10)) % 10;
 }
 
-// ========== GENERACIÓN DE TARJETAS (SOPORTA 15 Y 16 DÍGITOS) ==========
+// ========== GENERACIÓN DE TARJETAS (SOPORTA 15 Y 16 DÍGITOS, CVV 4 PARA AMEX) ==========
 function generarTarjetasDesdePatron(patron, cantidad = 10) {
     let normalizado = patron.trim().replace(/[ /-]+/g, '|');
     if (!normalizado.includes('|') && /[0-9X]{6,16}\d{4,6}/.test(normalizado)) {
@@ -438,8 +436,25 @@ function generarTarjetasDesdePatron(patron, cantidad = 10) {
         const primeros = numeroConX.slice(0, cardLength - 1);
         const digitoControl = calcularDigitoLuhn(primeros);
         const numeroCompleto = primeros + digitoControl;
-        let cvvGen = (cvv && cvv.toLowerCase() !== 'rnd') ? cvv.slice(0, 3) : Math.floor(100 + Math.random() * 900).toString();
-        if (!/^\d{3}$/.test(cvvGen)) cvvGen = Math.floor(100 + Math.random() * 900).toString();
+        // Generar CVV: si es AMEX (cardLength === 15) y es 'rnd' o no se especifica, usar 4 dígitos
+        let cvvGen;
+        if (cardLength === 15) {
+            // AMEX: CVV de 4 dígitos
+            if (cvv && cvv.toLowerCase() !== 'rnd') {
+                cvvGen = cvv.slice(0, 4);
+                if (!/^\d{4}$/.test(cvvGen)) cvvGen = Math.floor(1000 + Math.random() * 9000).toString();
+            } else {
+                cvvGen = Math.floor(1000 + Math.random() * 9000).toString();
+            }
+        } else {
+            // Visa/MC: CVV de 3 dígitos
+            if (cvv && cvv.toLowerCase() !== 'rnd') {
+                cvvGen = cvv.slice(0, 3);
+                if (!/^\d{3}$/.test(cvvGen)) cvvGen = Math.floor(100 + Math.random() * 900).toString();
+            } else {
+                cvvGen = Math.floor(100 + Math.random() * 900).toString();
+            }
+        }
         tarjetas.push(`${numeroCompleto}|${mes}|${año}|${cvvGen}`);
     }
     return tarjetas;
@@ -1031,10 +1046,12 @@ async function handleGenCommand(chatId, telegramId, fullParam, replyText = null)
                 normalized = `${numBase}|${mes}|${año}|${cvv}`;
             }
             const tarjetas = generarTarjetasDesdePatron(normalized, cantidad);
-            let lista = tarjetas.map(t => `\`${t}\``).join('\n');
-            if (lista.length > 100) {
+            let lista;
+            if (tarjetas.length > 100) {
                 lista = tarjetas.slice(0, 100).map(t => `\`${t}\``).join('\n');
                 lista += `\n... y ${tarjetas.length - 100} más`;
+            } else {
+                lista = tarjetas.map(t => `\`${t}\``).join('\n');
             }
             await sendSafeMessage(chatId, `🎴 *Tarjetas generadas (${tarjetas.length}):*\n${lista}`, { parse_mode: 'Markdown' });
         } else if (esBin) {
@@ -1056,9 +1073,14 @@ async function handleGenCommand(chatId, telegramId, fullParam, replyText = null)
             if (uni.length) mensaje += `🔴 ÚNICOS (${uni.length}):\n${uni.slice(0,10).map(p => { const [pf,m,a] = p.patron.split('|'); return `${pf}|${m}/${a}|rnd (${p.count} vez)`; }).join('\n')}`;
             await sendSafeMessage(chatId, mensaje, { parse_mode: 'Markdown' });
             const tarjetas = generarTarjetasDesdePatron(extraElegido, cantidad);
-            const lista = tarjetas.slice(0,20).map(t => `\`${t}\``).join('\n');
-            const resto = tarjetas.length > 20 ? `\n... y ${tarjetas.length-20} más` : '';
-            await sendSafeMessage(chatId, `🎴 *Tarjetas generadas (${tarjetas.length}):*\n${lista}${resto}`, { parse_mode: 'Markdown' });
+            let lista;
+            if (tarjetas.length > 20) {
+                lista = tarjetas.slice(0,20).map(t => `\`${t}\``).join('\n');
+                lista += `\n... y ${tarjetas.length - 20} más`;
+            } else {
+                lista = tarjetas.map(t => `\`${t}\``).join('\n');
+            }
+            await sendSafeMessage(chatId, `🎴 *Tarjetas generadas (${tarjetas.length}):*\n${lista}`, { parse_mode: 'Markdown' });
         } else if (esBanco) {
             let binElegido = null;
             for (const [key, bins] of Object.entries(bankBins)) {
@@ -1183,7 +1205,14 @@ async function handleAmazonCookieInfinita(chatId, telegramId, fullParam) {
     }
 
     const total = tarjetas.length;
-    await sendSafeMessage(chatId, `🎴 *Tarjetas a verificar (${total}):*\n${tarjetas.slice(0, 20).map(t => `\`${t}\``).join('\n')}${total > 20 ? `\n... y ${total - 20} más` : ''}`, { parse_mode: 'Markdown' });
+    let listaMostrada;
+    if (total > 20) {
+        listaMostrada = tarjetas.slice(0,20).map(t => `\`${t}\``).join('\n');
+        listaMostrada += `\n... y ${total - 20} más`;
+    } else {
+        listaMostrada = tarjetas.map(t => `\`${t}\``).join('\n');
+    }
+    await sendSafeMessage(chatId, `🎴 *Tarjetas a verificar (${total}):*\n${listaMostrada}`, { parse_mode: 'Markdown' });
 
     await sendSafeMessage(chatId, '💡 *Si deseas cancelar el proceso, envía un mensaje diciendo "Cancelar"*');
 
