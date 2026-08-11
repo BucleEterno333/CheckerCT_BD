@@ -463,23 +463,34 @@ function generarTarjetasDesdePatron(patron, cantidad = 10) {
 // ========== OBTENER PATRONES DESDE BIN (USANDO extractPatternsFromCards) ==========
 async function getPatternsFromBin(chatId, bin) {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 600000);
-    const response = await fetch(`${API_EXTRAPOLADOR_URL}/api/search-bin`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ bin }), signal: controller.signal
-    });
-    clearTimeout(timeoutId);
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const data = await response.json();
-    if (!data.success || !data.data || data.data.length === 0) throw new Error('No se encontraron tarjetas para ese BIN');
-    const patrones = extractPatternsFromCards(data.data);
-    if (Object.keys(patrones).length === 0) throw new Error('No se extrajeron patrones');
-    const ordenados = Object.entries(patrones).map(([p, c]) => ({ patron: p, count: c })).sort((a, b) => b.count - a.count);
-    return ordenados.map(p => {
-        const [prefijo, mes, año] = p.patron.split('|');
-        return `${prefijo}|${mes}|${año}|rnd`;
-    });
+    const timeoutId = setTimeout(() => controller.abort(), 1800000); // 30 minutos
+    try {
+        const response = await fetch(`${API_EXTRAPOLADOR_URL}/api/search-bin`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ bin }),
+            signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+        if (!data.success || !data.data || data.data.length === 0) {
+            throw new Error('No se encontraron tarjetas para ese BIN');
+        }
+        const patrones = extractPatternsFromCards(data.data);
+        if (Object.keys(patrones).length === 0) {
+            throw new Error('No se extrajeron patrones');
+        }
+        const ordenados = Object.entries(patrones).map(([p, c]) => ({ patron: p, count: c })).sort((a, b) => b.count - a.count);
+        return ordenados.map(p => {
+            const [prefijo, mes, año] = p.patron.split('|');
+            return `${prefijo}|${mes}|${año}|rnd`;
+        });
+    } catch (error) {
+        clearTimeout(timeoutId);
+        throw error;
+    }
 }
-
 async function getUserRoleFromDB(telegramId) {
     const res = await pool.query('SELECT role FROM users WHERE telegram_id = $1', [telegramId]);
     return res.rows[0]?.role || 'user';
@@ -937,28 +948,65 @@ async function handleMultiExtraCommand(chatId, telegramId, input) {
 
 async function handleExtrapoladorCommand(chatId, telegramId, input) {
     if (!await checkAndKickIfNoDaysOrCredits(telegramId, chatId, 10)) return;
+    
     let bin = input;
     if (!/^\d{6}$/.test(input)) {
         await sendSafeMessage(chatId, `🔍 Obteniendo bins de ${input}...`);
         let binElegido = null;
         for (const [key, bins] of Object.entries(bankBins)) {
-            if (input.toLowerCase().includes(key)) { binElegido = bins[0]; break; }
+            if (input.toLowerCase().includes(key)) { 
+                binElegido = bins[0]; 
+                break; 
+            }
         }
-        if (!binElegido) { await sendSafeMessage(chatId, '❌ No se encontraron bins'); return; }
+        if (!binElegido) {
+            await sendSafeMessage(chatId, '❌ No se encontraron bins para ese banco');
+            return;
+        }
         bin = binElegido;
         await sendSafeMessage(chatId, `✅ Usando BIN: ${bin}`);
     }
+    
     await sendSafeMessage(chatId, `🔮 Buscando extrapolaciones de BIN ${bin}...`);
+    
+    // TIMEOUT DE 30 MINUTOS (1,800,000 ms)
+    const timeoutMs = 1800000;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => {
+        console.log(`⏰ Timeout de ${timeoutMs/1000}s alcanzado para BIN ${bin}`);
+        controller.abort();
+    }, timeoutMs);
+    
     try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 600000);
-        const response = await fetch(`${API_EXTRAPOLADOR_URL}/api/search-bin`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ bin }), signal: controller.signal });
+        console.log(`📡 Enviando solicitud a extrapolador para BIN ${bin}...`);
+        const startTime = Date.now();
+        
+        const response = await fetch(`${API_EXTRAPOLADOR_URL}/api/search-bin`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ bin }),
+            signal: controller.signal
+        });
+        
         clearTimeout(timeoutId);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+        console.log(`✅ Respuesta recibida en ${elapsed}s para BIN ${bin}`);
+        
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
         const data = await response.json();
-        if (!data.success || !data.data || data.data.length === 0) throw new Error('Sin resultados');
+        if (!data.success || !data.data || data.data.length === 0) {
+            throw new Error('Sin resultados');
+        }
+        
         const patrones = extractPatternsFromCards(data.data);
-        if (Object.keys(patrones).length === 0) throw new Error('No se extrajeron patrones');
+        if (Object.keys(patrones).length === 0) {
+            throw new Error('No se extrajeron patrones');
+        }
+        
+        // Clasificar patrones
         const muy = [], mod = [], uni = [];
         for (const [patron, count] of Object.entries(patrones)) {
             if (count >= 3) muy.push({ patron, count });
@@ -968,6 +1016,7 @@ async function handleExtrapoladorCommand(chatId, telegramId, input) {
         muy.sort((a,b) => b.count - a.count);
         mod.sort((a,b) => b.count - a.count);
         uni.sort((a,b) => b.count - a.count);
+        
         let mensaje = `=== EXTRAPOLADOR - RESULTADOS ===\n\n`;
         if (muy.length) {
             mensaje += `🟢 MUY REPETIDOS (${muy.length}):\n`;
@@ -993,10 +1042,23 @@ async function handleExtrapoladorCommand(chatId, telegramId, input) {
             }
         }
         if (mensaje.length > 4090) mensaje = mensaje.substring(0,4000) + "\n...";
+        
         await sendSafeMessage(chatId, mensaje, { parse_mode: 'Markdown' });
+        
         const creditResult = await deductCredits(telegramId, 10);
         if (creditResult?.creditsZero) await kickUserFromGroup(telegramId);
-    } catch (error) { await sendSafeMessage(chatId, `❌ Error: ${error.message}`); }
+        
+        console.log(`✅ Extrapolación completada para BIN ${bin}`);
+        
+    } catch (error) {
+        clearTimeout(timeoutId);
+        console.error(`❌ Error en extrapolador para BIN ${bin}:`, error.message);
+        if (error.name === 'AbortError') {
+            await sendSafeMessage(chatId, `❌ La operación tomó más de 30 minutos y fue cancelada. El servidor de extrapolación está tardando demasiado.`);
+        } else {
+            await sendSafeMessage(chatId, `❌ Error: ${error.message}`);
+        }
+    }
 }
 
 async function handleGenCommand(chatId, telegramId, fullParam, replyText = null) {
