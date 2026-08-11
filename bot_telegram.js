@@ -948,10 +948,10 @@ async function handleExtrapoladorCommand(chatId, telegramId, input) {
         bin = binElegido;
         await sendSafeMessage(chatId, `✅ Usando BIN: ${bin}`);
     }
-    await sendSafeMessage(chatId, `🔮 Extrapolando para BIN ${bin}...`);
+    await sendSafeMessage(chatId, `🔮 Buscando extrapolaciones de BIN ${bin}...`);
     try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 360000);
+        const timeoutId = setTimeout(() => controller.abort(), 600000);
         const response = await fetch(`${API_EXTRAPOLADOR_URL}/api/search-bin`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ bin }), signal: controller.signal });
         clearTimeout(timeoutId);
         if (!response.ok) throw new Error(`HTTP ${response.status}`);

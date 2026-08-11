@@ -21,11 +21,11 @@ const initDatabase = async () => {
             CREATE TABLE IF NOT EXISTS users (
                 id SERIAL PRIMARY KEY,
                 username VARCHAR(50) UNIQUE NOT NULL,
-                telegram_username VARCHAR(50) UNIQUE,
+                telegram_username VARCHAR(100) UNIQUE,
                 telegram_verified BOOLEAN DEFAULT FALSE,
                 verified_at TIMESTAMP,
                 password_hash VARCHAR(255) NOT NULL,
-                display_name VARCHAR(100),
+                display_name VARCHAR(255),
                 credits INTEGER DEFAULT 4,
                 days_remaining INTEGER DEFAULT 0,
                 role VARCHAR(20) DEFAULT 'user' CHECK (role IN ('admin', 'seller', 'user')),
