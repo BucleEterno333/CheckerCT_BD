@@ -968,96 +968,101 @@ async function handleExtrapoladorCommand(chatId, telegramId, input) {
     }
     
     await sendSafeMessage(chatId, `🔮 Buscando extrapolaciones de BIN ${bin}...`);
-    
-    // TIMEOUT DE 30 MINUTOS (1,800,000 ms)
-    const timeoutMs = 1800000;
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => {
-        console.log(`⏰ Timeout de ${timeoutMs/1000}s alcanzado para BIN ${bin}`);
-        controller.abort();
-    }, timeoutMs);
-    
+
     try {
-        console.log(`📡 Enviando solicitud a extrapolador para BIN ${bin}...`);
-        const startTime = Date.now();
-        
-        const response = await fetch(`${API_EXTRAPOLADOR_URL}/api/search-bin`, {
+        // 1. Iniciar tarea asíncrona
+        const startRes = await fetch(`${API_EXTRAPOLADOR_URL}/api/search-bin/async`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ bin }),
-            signal: controller.signal
+            body: JSON.stringify({ bin })
         });
-        
-        clearTimeout(timeoutId);
-        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-        console.log(`✅ Respuesta recibida en ${elapsed}s para BIN ${bin}`);
-        
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        const startData = await startRes.json();
+        if (!startData.taskId) {
+            throw new Error('No se pudo iniciar la tarea');
         }
-        
-        const data = await response.json();
-        if (!data.success || !data.data || data.data.length === 0) {
-            throw new Error('Sin resultados');
-        }
-        
-        const patrones = extractPatternsFromCards(data.data);
-        if (Object.keys(patrones).length === 0) {
-            throw new Error('No se extrajeron patrones');
-        }
-        
-        // Clasificar patrones
-        const muy = [], mod = [], uni = [];
-        for (const [patron, count] of Object.entries(patrones)) {
-            if (count >= 3) muy.push({ patron, count });
-            else if (count === 2) mod.push({ patron, count });
-            else uni.push({ patron, count });
-        }
-        muy.sort((a,b) => b.count - a.count);
-        mod.sort((a,b) => b.count - a.count);
-        uni.sort((a,b) => b.count - a.count);
-        
-        let mensaje = `=== EXTRAPOLADOR - RESULTADOS ===\n\n`;
-        if (muy.length) {
-            mensaje += `🟢 MUY REPETIDOS (${muy.length}):\n`;
-            for (const p of muy.slice(0,15)) {
-                const [prefixWithX, mes, año] = p.patron.split('|');
-                mensaje += `\`${prefixWithX}|${mes}|${año}|rnd\` (${p.count} veces)\n`;
+        const taskId = startData.taskId;
+        await sendSafeMessage(chatId, `🔄 Tarea iniciada (ID: ${taskId}). Esperando resultados...`);
+
+        // 2. Polling al endpoint de resultado cada 3 segundos, máximo 20 intentos (1 minuto)
+        let attempts = 0;
+        const MAX_ATTEMPTS = 60; // 60 * 3s = 3 minutos (damos margen)
+        let result = null;
+        let error = null;
+
+        while (attempts < MAX_ATTEMPTS) {
+            attempts++;
+            await new Promise(r => setTimeout(r, 3000));
+
+            const statusRes = await fetch(`${API_EXTRAPOLADOR_URL}/api/search-bin/result/${taskId}`);
+            const statusData = await statusRes.json();
+
+            if (statusData.status === 'done') {
+                result = statusData.result;
+                break;
+            } else if (statusData.status === 'error') {
+                error = statusData.error;
+                break;
             }
-            mensaje += `\n`;
+            // Si sigue pending, continuamos
         }
-        if (mod.length) {
-            mensaje += `🟡 MODERADOS (${mod.length}):\n`;
-            for (const p of mod.slice(0,15)) {
-                const [prefix, mes, año] = p.patron.split('|');
-                mensaje += `\`${prefix}|${mes}|${año}|rnd\` (${p.count} veces)\n`;
+
+        if (result) {
+            // Procesar resultados igual que antes
+            const patrones = extractPatternsFromCards(result.data);
+            if (Object.keys(patrones).length === 0) {
+                throw new Error('No se extrajeron patrones');
             }
-            mensaje += `\n`;
-        }
-        if (uni.length) {
-            mensaje += `🔴 ÚNICOS (${uni.length}):\n`;
-            for (const p of uni.slice(0,20)) {
-                const [prefix, mes, año] = p.patron.split('|');
-                mensaje += `\`${prefix}|${mes}|${año}|rnd\` (${p.count} vez)\n`;
+
+            const muy = [], mod = [], uni = [];
+            for (const [patron, count] of Object.entries(patrones)) {
+                if (count >= 3) muy.push({ patron, count });
+                else if (count === 2) mod.push({ patron, count });
+                else uni.push({ patron, count });
             }
-        }
-        if (mensaje.length > 4090) mensaje = mensaje.substring(0,4000) + "\n...";
-        
-        await sendSafeMessage(chatId, mensaje, { parse_mode: 'Markdown' });
-        
-        const creditResult = await deductCredits(telegramId, 10);
-        if (creditResult?.creditsZero) await kickUserFromGroup(telegramId);
-        
-        console.log(`✅ Extrapolación completada para BIN ${bin}`);
-        
-    } catch (error) {
-        clearTimeout(timeoutId);
-        console.error(`❌ Error en extrapolador para BIN ${bin}:`, error.message);
-        if (error.name === 'AbortError') {
-            await sendSafeMessage(chatId, `❌ La operación tomó más de 30 minutos y fue cancelada. El servidor de extrapolación está tardando demasiado.`);
+            muy.sort((a,b) => b.count - a.count);
+            mod.sort((a,b) => b.count - a.count);
+            uni.sort((a,b) => b.count - a.count);
+
+            let mensaje = `=== EXTRAPOLADOR - RESULTADOS ===\n\n`;
+            if (muy.length) {
+                mensaje += `🟢 MUY REPETIDOS (${muy.length}):\n`;
+                for (const p of muy.slice(0,15)) {
+                    const [prefixWithX, mes, año] = p.patron.split('|');
+                    mensaje += `\`${prefixWithX}|${mes}|${año}|rnd\` (${p.count} veces)\n`;
+                }
+                mensaje += `\n`;
+            }
+            if (mod.length) {
+                mensaje += `🟡 MODERADOS (${mod.length}):\n`;
+                for (const p of mod.slice(0,15)) {
+                    const [prefix, mes, año] = p.patron.split('|');
+                    mensaje += `\`${prefix}|${mes}|${año}|rnd\` (${p.count} veces)\n`;
+                }
+                mensaje += `\n`;
+            }
+            if (uni.length) {
+                mensaje += `🔴 ÚNICOS (${uni.length}):\n`;
+                for (const p of uni.slice(0,20)) {
+                    const [prefix, mes, año] = p.patron.split('|');
+                    mensaje += `\`${prefix}|${mes}|${año}|rnd\` (${p.count} vez)\n`;
+                }
+            }
+            if (mensaje.length > 4090) mensaje = mensaje.substring(0,4000) + "\n...";
+
+            await sendSafeMessage(chatId, mensaje, { parse_mode: 'Markdown' });
+
+            const creditResult = await deductCredits(telegramId, 10);
+            if (creditResult?.creditsZero) await kickUserFromGroup(telegramId);
+
+        } else if (error) {
+            throw new Error(error);
         } else {
-            await sendSafeMessage(chatId, `❌ Error: ${error.message}`);
+            throw new Error('Tiempo de espera agotado para la tarea');
         }
+
+    } catch (error) {
+        console.error(`❌ Error en extrapolador para BIN ${bin}:`, error.message);
+        await sendSafeMessage(chatId, `❌ Error: ${error.message}`);
     }
 }
 
