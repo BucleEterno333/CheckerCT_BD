@@ -1033,7 +1033,7 @@ async function handleExtrapoladorCommand(chatId, telegramId, input) {
     }
 
     try {
-        await sendSafeMessage(chatId, `🔮 Buscando extrapolaciones de BIN ${bin} (API paga)...`);
+        await sendSafeMessage(chatId, `🔮 Buscando extras de BIN ${bin}...`);
 
         // Intentar con la API de paga (usando el sistema async)
         const startRes = await fetch(`${API_PAGA}/api/search-bin/async`, {
@@ -1046,7 +1046,6 @@ async function handleExtrapoladorCommand(chatId, telegramId, input) {
             throw new Error('No se pudo iniciar la tarea en API paga');
         }
         const taskId = startData.taskId;
-        await sendSafeMessage(chatId, `🔄 Tarea iniciada en API paga (ID: ${taskId}). Esperando resultados...`);
 
         // Polling
         let attempts = 0;
@@ -1126,7 +1125,7 @@ async function handleExtrapoladerCommand(chatId, telegramId, bin) {
         throw new Error('No se configuró ninguna URL para extrapolación');
     }
 
-    await sendSafeMessage(chatId, `🔮 Buscando extrapolaciones de BIN ${bin} (API gratuita)...`);
+    await sendSafeMessage(chatId, `🔮 Buscando extras de BIN ${bin}...`);
 
     try {
         // Intentar con la API gratuita (también con sistema async)
