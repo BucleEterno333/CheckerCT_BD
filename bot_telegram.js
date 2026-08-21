@@ -1114,6 +1114,8 @@ async function handleExtrapoladorCommand(chatId, telegramId, input) {
 
         if (isNetworkError && API_GRATIS) {
             await sendSafeMessage(chatId, `⚠️ La API rápida no está disponible. Reintentando con la versión lenta...`);
+            const messageExtrapolador = `⚠️ *Avisenle a Bucle que Lattice y Extrapolador están caídos* ⚠️\n\n`;
+            await notifyAdminsAndGroups(messageExtrapolador);
             return await handleExtrapoladerCommand(chatId, telegramId, bin, fallback=true);
         } else {
             // Si es otro tipo de error (ej. sin resultados), lo mostramos directamente
