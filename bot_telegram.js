@@ -1113,7 +1113,7 @@ async function handleExtrapoladorCommand(chatId, telegramId, input) {
                                error.message.includes('No se pudo iniciar');
 
         if (isNetworkError && API_GRATIS) {
-            await sendSafeMessage(chatId, `⚠️ La API de paga no está disponible (${error.message}). Reintentando con la versión gratuita...`);
+            await sendSafeMessage(chatId, `⚠️ La API rápida no está disponible. Reintentando con la versión lenta...`);
             return await handleExtrapoladerCommand(chatId, telegramId, bin);
         } else {
             // Si es otro tipo de error (ej. sin resultados), lo mostramos directamente
