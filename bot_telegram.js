@@ -1024,7 +1024,7 @@ async function handleExtrapoladorCommand(chatId, telegramId, input) {
     
     // --- PRIMER INTENTO CON LA API DE PAGA ---
     const API_PAGA = process.env.API_EXTRAPOLADOR_URL; // la de mucha RAM
-    const API_GRATIS = process.env.API_EXTRAPOLADER_URL || API_PAGA; // fallback
+    const API_GRATIS = process.env.API_EXTRAPOLADER_URL; // fallback
 
     // Si no hay API de paga, directamente usamos la gratuita
     if (!API_PAGA) {
@@ -1121,7 +1121,7 @@ async function handleExtrapoladerCommand(chatId, telegramId, bin) {
         await sendSafeMessage(chatId, `✅ Usando BIN: ${bin}`);
     }
 
-    const API_GRATIS = process.env.API_EXTRAPOLADER_URL || process.env.API_EXTRAPOLADOR_URL;
+    const API_GRATIS = process.env.API_EXTRAPOLADER_URL;
     if (!API_GRATIS) {
         throw new Error('No se configuró ninguna URL para extrapolación');
     }
