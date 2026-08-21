@@ -27,6 +27,8 @@ const API_EXTRAPOLADOR_URL = process.env.API_EXTRAPOLADOR_URL;
 const API_AMAZON_CHECK_URL = process.env.API_AMAZON_CHECK_URL;
 const API_LATTICE_URL = process.env.API_LATTICE_URL || 'https://api.lattice.com/check';
 const GROUP_CHAT_ID = process.env.GROUP_CHAT_ID;
+const API_EXTRAPOLADER_URL = process.env.API_EXTRAPOLADER_URL;
+
 
 const bot = new TelegramBot(token, { polling: true });
 console.log('🤖 Bot de Telegram mejorado iniciado');
@@ -338,6 +340,56 @@ function extractPatternsFromCards(cards) {
     }
     return patrones;
 }
+
+
+async function mostrarResultadosExtrapolacion(chatId, data, telegramId) {
+    const patrones = extractPatternsFromCards(data);
+    if (Object.keys(patrones).length === 0) {
+        throw new Error('No se extrajeron patrones');
+    }
+
+    const muy = [], mod = [], uni = [];
+    for (const [patron, count] of Object.entries(patrones)) {
+        if (count >= 3) muy.push({ patron, count });
+        else if (count === 2) mod.push({ patron, count });
+        else uni.push({ patron, count });
+    }
+    muy.sort((a,b) => b.count - a.count);
+    mod.sort((a,b) => b.count - a.count);
+    uni.sort((a,b) => b.count - a.count);
+
+    let mensaje = `=== EXTRAPOLADOR - RESULTADOS ===\n\n`;
+    if (muy.length) {
+        mensaje += `🟢 MUY REPETIDOS (${muy.length}):\n`;
+        for (const p of muy.slice(0,15)) {
+            const [prefixWithX, mes, año] = p.patron.split('|');
+            mensaje += `\`${prefixWithX}|${mes}|${año}|rnd\` (${p.count} veces)\n`;
+        }
+        mensaje += `\n`;
+    }
+    if (mod.length) {
+        mensaje += `🟡 MODERADOS (${mod.length}):\n`;
+        for (const p of mod.slice(0,15)) {
+            const [prefix, mes, año] = p.patron.split('|');
+            mensaje += `\`${prefix}|${mes}|${año}|rnd\` (${p.count} veces)\n`;
+        }
+        mensaje += `\n`;
+    }
+    if (uni.length) {
+        mensaje += `🔴 ÚNICOS (${uni.length}):\n`;
+        for (const p of uni.slice(0,20)) {
+            const [prefix, mes, año] = p.patron.split('|');
+            mensaje += `\`${prefix}|${mes}|${año}|rnd\` (${p.count} vez)\n`;
+        }
+    }
+    if (mensaje.length > 4090) mensaje = mensaje.substring(0,4000) + "\n...";
+
+    await sendSafeMessage(chatId, mensaje, { parse_mode: 'Markdown' });
+
+    const creditResult = await deductCredits(telegramId, 10);
+    if (creditResult?.creditsZero) await kickUserFromGroup(telegramId);
+}
+
 
 function limpiarTarjetas(textoSucio) {
     if (!textoSucio) return [];
@@ -946,6 +998,9 @@ async function handleMultiExtraCommand(chatId, telegramId, input) {
     await sendSafeMessage(chatId, `🔢 ¿Cuántos extras deseas usar? (1-${extras.length})`);
 }
 
+
+
+// Comando principal con fallback
 async function handleExtrapoladorCommand(chatId, telegramId, input) {
     if (!await checkAndKickIfNoDaysOrCredits(telegramId, chatId, 10)) return;
     
@@ -967,26 +1022,35 @@ async function handleExtrapoladorCommand(chatId, telegramId, input) {
         await sendSafeMessage(chatId, `✅ Usando BIN: ${bin}`);
     }
     
-    await sendSafeMessage(chatId, `🔮 Buscando extrapolaciones de BIN ${bin}...`);
+    // --- PRIMER INTENTO CON LA API DE PAGA ---
+    const API_PAGA = process.env.API_EXTRAPOLADOR_URL; // la de mucha RAM
+    const API_GRATIS = process.env.API_EXTRAPOLADER_URL || API_PAGA; // fallback
+
+    // Si no hay API de paga, directamente usamos la gratuita
+    if (!API_PAGA) {
+        await sendSafeMessage(chatId, 'ℹ️ No se configuró API de paga. Usando versión gratuita...');
+        return await handleExtrapoladerCommand(chatId, telegramId, bin);
+    }
 
     try {
-        // 1. Iniciar tarea asíncrona
-        const startRes = await fetch(`${API_EXTRAPOLADOR_URL}/api/search-bin/async`, {
+        await sendSafeMessage(chatId, `🔮 Buscando extrapolaciones de BIN ${bin} (API paga)...`);
+
+        // Intentar con la API de paga (usando el sistema async)
+        const startRes = await fetch(`${API_PAGA}/api/search-bin/async`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ bin })
         });
         const startData = await startRes.json();
         if (!startData.taskId) {
-            throw new Error('No se pudo iniciar la tarea');
+            throw new Error('No se pudo iniciar la tarea en API paga');
         }
         const taskId = startData.taskId;
-        await sendSafeMessage(chatId, `🔄 Tarea iniciada (ID: ${taskId}). Esperando resultados...`);
+        await sendSafeMessage(chatId, `🔄 Tarea iniciada en API paga (ID: ${taskId}). Esperando resultados...`);
 
-        // 2. Polling al endpoint de resultado cada 3 segundos, máximo 20 intentos (1 minuto)
-        // Aumentamos a 100 intentos (5 minutos) para dar tiempo a que el servidor procese
+        // Polling
         let attempts = 0;
-        const MAX_ATTEMPTS = 400; // 400 * 3s = 20 minutos (damos margen)
+        const MAX_ATTEMPTS = 400; // 20 minutos
         let result = null;
         let error = null;
 
@@ -994,7 +1058,7 @@ async function handleExtrapoladorCommand(chatId, telegramId, input) {
             attempts++;
             await new Promise(r => setTimeout(r, 3000));
 
-            const statusRes = await fetch(`${API_EXTRAPOLADOR_URL}/api/search-bin/result/${taskId}`);
+            const statusRes = await fetch(`${API_PAGA}/api/search-bin/result/${taskId}`);
             const statusData = await statusRes.json();
 
             if (statusData.status === 'done') {
@@ -1004,68 +1068,117 @@ async function handleExtrapoladorCommand(chatId, telegramId, input) {
                 error = statusData.error;
                 break;
             }
-            // Si sigue pending, continuamos
         }
 
         if (result) {
-            // Procesar resultados igual que antes
-            const patrones = extractPatternsFromCards(result.data);
-            if (Object.keys(patrones).length === 0) {
-                throw new Error('No se extrajeron patrones');
-            }
-
-            const muy = [], mod = [], uni = [];
-            for (const [patron, count] of Object.entries(patrones)) {
-                if (count >= 3) muy.push({ patron, count });
-                else if (count === 2) mod.push({ patron, count });
-                else uni.push({ patron, count });
-            }
-            muy.sort((a,b) => b.count - a.count);
-            mod.sort((a,b) => b.count - a.count);
-            uni.sort((a,b) => b.count - a.count);
-
-            let mensaje = `=== EXTRAPOLADOR - RESULTADOS ===\n\n`;
-            if (muy.length) {
-                mensaje += `🟢 MUY REPETIDOS (${muy.length}):\n`;
-                for (const p of muy.slice(0,15)) {
-                    const [prefixWithX, mes, año] = p.patron.split('|');
-                    mensaje += `\`${prefixWithX}|${mes}|${año}|rnd\` (${p.count} veces)\n`;
-                }
-                mensaje += `\n`;
-            }
-            if (mod.length) {
-                mensaje += `🟡 MODERADOS (${mod.length}):\n`;
-                for (const p of mod.slice(0,15)) {
-                    const [prefix, mes, año] = p.patron.split('|');
-                    mensaje += `\`${prefix}|${mes}|${año}|rnd\` (${p.count} veces)\n`;
-                }
-                mensaje += `\n`;
-            }
-            if (uni.length) {
-                mensaje += `🔴 ÚNICOS (${uni.length}):\n`;
-                for (const p of uni.slice(0,20)) {
-                    const [prefix, mes, año] = p.patron.split('|');
-                    mensaje += `\`${prefix}|${mes}|${año}|rnd\` (${p.count} vez)\n`;
-                }
-            }
-            if (mensaje.length > 4090) mensaje = mensaje.substring(0,4000) + "\n...";
-
-            await sendSafeMessage(chatId, mensaje, { parse_mode: 'Markdown' });
-
-            const creditResult = await deductCredits(telegramId, 10);
-            if (creditResult?.creditsZero) await kickUserFromGroup(telegramId);
-
+            // Procesar y mostrar resultados (igual que antes)
+            await mostrarResultadosExtrapolacion(chatId, result.data, telegramId);
+            return;
         } else if (error) {
             throw new Error(error);
         } else {
-            throw new Error('Tiempo de espera agotado para la tarea');
+            throw new Error('Tiempo de espera agotado en API paga');
         }
 
     } catch (error) {
-        console.error(`❌ Error en extrapolador para BIN ${bin}:`, error.message);
+        console.warn(`⚠️ Error en API paga para BIN ${bin}:`, error.message);
+        // Si el error es de red/fetch, intentamos con la gratuita
+        const isNetworkError = error.message.includes('fetch') || 
+                               error.message.includes('abort') || 
+                               error.message.includes('timeout') ||
+                               error.message.includes('ECONNREFUSED') ||
+                               error.message.includes('ENOTFOUND');
+        
+        if (isNetworkError && API_GRATIS) {
+            await sendSafeMessage(chatId, `⚠️ La API de paga no está disponible (${error.message}). Reintentando con la versión gratuita...`);
+            return await handleExtrapoladerCommand(chatId, telegramId, bin);
+        } else {
+            // Si es otro tipo de error (ej. sin resultados), lo mostramos directamente
+            throw error;
+        }
+    }
+}
+
+
+// ========== VERSIÓN GRATUITA (FALLBACK) ==========
+async function handleExtrapoladerCommand(chatId, telegramId, bin) {
+    // Si ya se pasó un BIN, lo usamos, si no, normalizamos
+    let input = bin;
+    if (!/^\d{6}$/.test(input)) {
+        await sendSafeMessage(chatId, `🔍 Obteniendo bins de ${input}...`);
+        let binElegido = null;
+        for (const [key, bins] of Object.entries(bankBins)) {
+            if (input.toLowerCase().includes(key)) { 
+                binElegido = bins[0]; 
+                break; 
+            }
+        }
+        if (!binElegido) {
+            await sendSafeMessage(chatId, '❌ No se encontraron bins para ese banco');
+            return;
+        }
+        bin = binElegido;
+        await sendSafeMessage(chatId, `✅ Usando BIN: ${bin}`);
+    }
+
+    const API_GRATIS = process.env.API_EXTRAPOLADER_URL || process.env.API_EXTRAPOLADOR_URL;
+    if (!API_GRATIS) {
+        throw new Error('No se configuró ninguna URL para extrapolación');
+    }
+
+    await sendSafeMessage(chatId, `🔮 Buscando extrapolaciones de BIN ${bin} (API gratuita)...`);
+
+    try {
+        // Intentar con la API gratuita (también con sistema async)
+        const startRes = await fetch(`${API_GRATIS}/api/search-bin/async`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ bin })
+        });
+        const startData = await startRes.json();
+        if (!startData.taskId) {
+            throw new Error('No se pudo iniciar la tarea en API gratuita');
+        }
+        const taskId = startData.taskId;
+        await sendSafeMessage(chatId, `🔄 Tarea iniciada en API gratuita (ID: ${taskId}). Esperando resultados...`);
+
+        // Polling
+        let attempts = 0;
+        const MAX_ATTEMPTS = 400; // 20 minutos
+        let result = null;
+        let error = null;
+
+        while (attempts < MAX_ATTEMPTS) {
+            attempts++;
+            await new Promise(r => setTimeout(r, 3000));
+
+            const statusRes = await fetch(`${API_GRATIS}/api/search-bin/result/${taskId}`);
+            const statusData = await statusRes.json();
+
+            if (statusData.status === 'done') {
+                result = statusData.result;
+                break;
+            } else if (statusData.status === 'error') {
+                error = statusData.error;
+                break;
+            }
+        }
+
+        if (result) {
+            await mostrarResultadosExtrapolacion(chatId, result.data, telegramId);
+            return;
+        } else if (error) {
+            throw new Error(error);
+        } else {
+            throw new Error('Tiempo de espera agotado en API gratuita');
+        }
+
+    } catch (error) {
+        console.error(`❌ Error en API gratuita para BIN ${bin}:`, error.message);
         await sendSafeMessage(chatId, `❌ Error: ${error.message}`);
     }
 }
+
 async function handleGenCommand(chatId, telegramId, fullParam, replyText = null) {
     if (!await checkAndKickIfNoDaysOrCredits(telegramId, chatId, 0)) return;
     let cantidad = 14;
@@ -2423,6 +2536,20 @@ bot.onText(/^[\/\.](?:extrapolador|extrapolado|extrapolad|extrapolar|extrapola|e
         return sendSafeMessage(chatId, '🔢 Envía un BIN de 6 dígitos, nombre de banco o país:');
     }
     await handleExtrapoladorCommand(chatId, telegramId, input);
+    clearUserState(telegramId);
+});
+
+bot.onText(/^[\/\.](?:extrapolader|extrapoladr)(?:\s+(.+))?/i, async (msg, match) => {
+    const chatId = msg.chat.id;
+    const telegramId = msg.from.id;
+    let input = match[1]?.trim();
+    if (!input && msg.reply_to_message?.text) input = msg.reply_to_message.text.trim();
+    if (!input) {
+        setUserState(telegramId, { step: 'awaiting_extrapolader_input' });
+        return sendSafeMessage(chatId, '🔢 Envía un BIN de 6 dígitos, nombre de banco o país:');
+    }
+    // Llamamos directamente a la función gratuita
+    await handleExtrapoladerCommand(chatId, telegramId, input);
     clearUserState(telegramId);
 });
 
