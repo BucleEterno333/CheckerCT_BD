@@ -1139,7 +1139,6 @@ async function handleExtrapoladerCommand(chatId, telegramId, bin) {
             throw new Error('No se pudo iniciar la tarea en API gratuita');
         }
         const taskId = startData.taskId;
-        await sendSafeMessage(chatId, `🔄 Tarea iniciada en API gratuita (ID: ${taskId}). Esperando resultados...`);
 
         // Polling
         let attempts = 0;
@@ -2538,16 +2537,25 @@ bot.onText(/^[\/\.](?:extrapolador|extrapolado|extrapolad|extrapolar|extrapola|e
     clearUserState(telegramId);
 });
 
-bot.onText(/^[\/\.](?:extrapolader|extrapoladr)(?:\s+(.+))?/i, async (msg, match) => {
+// Comando /extrapolader (versión gratuita) - con extracción robusta
+bot.onText(/^[\/\.](?:extrapolader|extrapoladr)/i, async (msg) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
-    let input = match[1]?.trim();
-    if (!input && msg.reply_to_message?.text) input = msg.reply_to_message.text.trim();
+    
+    // Extraer el parámetro después del comando (más robusto que match[1])
+    const parts = msg.text.split(/\s+/);
+    let input = parts.length > 1 ? parts.slice(1).join(' ') : '';
+    
+    // Si no hay parámetro pero es respuesta a otro mensaje, tomarlo de ahí
+    if (!input && msg.reply_to_message?.text) {
+        input = msg.reply_to_message.text.trim();
+    }
+    
     if (!input) {
         setUserState(telegramId, { step: 'awaiting_extrapolader_input' });
         return sendSafeMessage(chatId, '🔢 Envía un BIN de 6 dígitos, nombre de banco o país:');
     }
-    // Llamamos directamente a la función gratuita
+    
     await handleExtrapoladerCommand(chatId, telegramId, input);
     clearUserState(telegramId);
 });
