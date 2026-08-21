@@ -1001,6 +1001,7 @@ async function handleMultiExtraCommand(chatId, telegramId, input) {
 
 
 // Comando principal con fallback
+// Comando principal con fallback (tiempo de espera rápido)
 async function handleExtrapoladorCommand(chatId, telegramId, input) {
     if (!await checkAndKickIfNoDaysOrCredits(telegramId, chatId, 10)) return;
     
@@ -1032,15 +1033,34 @@ async function handleExtrapoladorCommand(chatId, telegramId, input) {
         return await handleExtrapoladerCommand(chatId, telegramId, bin);
     }
 
+    // Función auxiliar para hacer fetch con timeout
+    async function fetchWithTimeout(url, options, timeoutMs = 8000) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+            const response = await fetch(url, { ...options, signal: controller.signal });
+            clearTimeout(timeoutId);
+            return response;
+        } catch (error) {
+            clearTimeout(timeoutId);
+            throw error;
+        }
+    }
+
     try {
         await sendSafeMessage(chatId, `🔮 Buscando extras de BIN ${bin}...`);
 
         // Intentar con la API de paga (usando el sistema async)
-        const startRes = await fetch(`${API_PAGA}/api/search-bin/async`, {
+        const startRes = await fetchWithTimeout(`${API_PAGA}/api/search-bin/async`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ bin })
-        });
+        }, 8000); // 8 segundos de timeout para la conexión
+
+        if (!startRes.ok) {
+            throw new Error(`HTTP ${startRes.status} - ${startRes.statusText}`);
+        }
+
         const startData = await startRes.json();
         if (!startData.taskId) {
             throw new Error('No se pudo iniciar la tarea en API paga');
@@ -1057,6 +1077,7 @@ async function handleExtrapoladorCommand(chatId, telegramId, input) {
             attempts++;
             await new Promise(r => setTimeout(r, 3000));
 
+            // También podemos usar fetchWithTimeout para cada poll, pero el polling es largo, mejor usar timeout largo o sin timeout
             const statusRes = await fetch(`${API_PAGA}/api/search-bin/result/${taskId}`);
             const statusData = await statusRes.json();
 
@@ -1070,7 +1091,6 @@ async function handleExtrapoladorCommand(chatId, telegramId, input) {
         }
 
         if (result) {
-            // Procesar y mostrar resultados (igual que antes)
             await mostrarResultadosExtrapolacion(chatId, result.data, telegramId);
             return;
         } else if (error) {
@@ -1081,24 +1101,28 @@ async function handleExtrapoladorCommand(chatId, telegramId, input) {
 
     } catch (error) {
         console.warn(`⚠️ Error en API paga para BIN ${bin}:`, error.message);
-        // Si el error es de red/fetch, intentamos con la gratuita
+        
+        // Si el error es de red o respuesta no 2xx, intentamos con la gratuita
         const isNetworkError = error.message.includes('fetch') || 
                                error.message.includes('abort') || 
                                error.message.includes('timeout') ||
                                error.message.includes('ECONNREFUSED') ||
-                               error.message.includes('ENOTFOUND');
-        
+                               error.message.includes('ENOTFOUND') ||
+                               error.message.includes('HTTP') ||
+                               error.message.includes('not ok') ||
+                               error.message.includes('No se pudo iniciar');
+
         if (isNetworkError && API_GRATIS) {
             await sendSafeMessage(chatId, `⚠️ La API de paga no está disponible (${error.message}). Reintentando con la versión gratuita...`);
             return await handleExtrapoladerCommand(chatId, telegramId, bin);
         } else {
             // Si es otro tipo de error (ej. sin resultados), lo mostramos directamente
-            throw error;
+            await sendSafeMessage(chatId, `❌ Error: ${error.message}`);
         }
     }
 }
 
-
+// ========== VERSIÓN GRATUITA (FALLBACK) ==========
 // ========== VERSIÓN GRATUITA (FALLBACK) ==========
 async function handleExtrapoladerCommand(chatId, telegramId, bin) {
     // Si ya se pasó un BIN, lo usamos, si no, normalizamos
@@ -1127,13 +1151,32 @@ async function handleExtrapoladerCommand(chatId, telegramId, bin) {
 
     await sendSafeMessage(chatId, `🔮 Buscando extras de BIN ${bin}...`);
 
+    // Función auxiliar para fetch con timeout
+    async function fetchWithTimeout(url, options, timeoutMs = 8000) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+            const response = await fetch(url, { ...options, signal: controller.signal });
+            clearTimeout(timeoutId);
+            return response;
+        } catch (error) {
+            clearTimeout(timeoutId);
+            throw error;
+        }
+    }
+
     try {
         // Intentar con la API gratuita (también con sistema async)
-        const startRes = await fetch(`${API_GRATIS}/api/search-bin/async`, {
+        const startRes = await fetchWithTimeout(`${API_GRATIS}/api/search-bin/async`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ bin })
-        });
+        }, 8000);
+
+        if (!startRes.ok) {
+            throw new Error(`HTTP ${startRes.status} - ${startRes.statusText}`);
+        }
+
         const startData = await startRes.json();
         if (!startData.taskId) {
             throw new Error('No se pudo iniciar la tarea en API gratuita');
