@@ -1114,7 +1114,7 @@ async function handleExtrapoladorCommand(chatId, telegramId, input) {
 
         if (isNetworkError && API_GRATIS) {
             await sendSafeMessage(chatId, `⚠️ La API rápida no está disponible. Reintentando con la versión lenta...`);
-            return await handleExtrapoladerCommand(chatId, telegramId, bin);
+            return await handleExtrapoladerCommand(chatId, telegramId, bin, fallback=true);
         } else {
             // Si es otro tipo de error (ej. sin resultados), lo mostramos directamente
             await sendSafeMessage(chatId, `❌ Error: ${error.message}`);
@@ -1124,7 +1124,7 @@ async function handleExtrapoladorCommand(chatId, telegramId, input) {
 
 // ========== VERSIÓN GRATUITA (FALLBACK) ==========
 // ========== VERSIÓN GRATUITA (FALLBACK) ==========
-async function handleExtrapoladerCommand(chatId, telegramId, bin) {
+async function handleExtrapoladerCommand(chatId, telegramId, bin, fallback=false) {
     // Si ya se pasó un BIN, lo usamos, si no, normalizamos
     let input = bin;
     if (!/^\d{6}$/.test(input)) {
@@ -1149,7 +1149,9 @@ async function handleExtrapoladerCommand(chatId, telegramId, bin) {
         throw new Error('No se configuró ninguna URL para extrapolación');
     }
 
-    await sendSafeMessage(chatId, `🔮 Buscando extras de BIN ${bin}...`);
+    if (fallback === false) {
+        await sendSafeMessage(chatId, `🔮 Buscando extras de BIN ${bin}...`);
+    }
 
     // Función auxiliar para fetch con timeout
     async function fetchWithTimeout(url, options, timeoutMs = 8000) {
