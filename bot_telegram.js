@@ -2524,13 +2524,17 @@ bot.onText(/^[\/\.](?:binlist|bins|list|binl|bnl)(?:\s+(.+))?/i, async (msg, mat
     clearUserState(telegramId);
 });
 
-// Comando /extrapolader (versión gratuita) - con extracción robusta
-// Comando /extrapolader (versión gratuita)
-bot.onText(/^[\/\.](?:extrapolader|extrapoladr|extrapoladere?)(?:\s+(.+))?/i, async (msg, match) => {
+
+// Comando /extrapolader (versión gratuita) - debe ir PRIMERO
+bot.onText(/^[\/\.]extrapolader(?:s?)?\b/i, async (msg) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
-    let input = match[1]?.trim();
-    if (!input && msg.reply_to_message?.text) input = msg.reply_to_message.text.trim();
+    // Extraer parámetro manualmente
+    const parts = msg.text.split(/\s+/);
+    let input = parts.length > 1 ? parts.slice(1).join(' ') : '';
+    if (!input && msg.reply_to_message?.text) {
+        input = msg.reply_to_message.text.trim();
+    }
     if (!input) {
         setUserState(telegramId, { step: 'awaiting_extrapolader_input' });
         return sendSafeMessage(chatId, '🔢 Envía un BIN de 6 dígitos, nombre de banco o país:');
@@ -2539,11 +2543,16 @@ bot.onText(/^[\/\.](?:extrapolader|extrapoladr|extrapoladere?)(?:\s+(.+))?/i, as
     clearUserState(telegramId);
 });
 
-bot.onText(/^[\/\.](?:extrapolador|extrapolado|extrapolad|extrapolar|extrapola|extrapol|extrapo|extrap|extras|extra|expo|exp|ext|xtr|xtrp|scrapper|scrapp|scrp)(?:\s+(.+))?/i, async (msg, match) => {
+// Comando /extrapolador (versión paga con fallback) - debe ir DESPUÉS
+bot.onText(/^[\/\.](?:extrapolador|extrapolado|extrapolad|extrapolar|extrapola|extrapol|extrapo|extras|extra|expo|exp|scrapper|scrapp|scrp)\b/i, async (msg) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
-    let input = match[1]?.trim();
-    if (!input && msg.reply_to_message?.text) input = msg.reply_to_message.text.trim();
+    // Extraer parámetro manualmente
+    const parts = msg.text.split(/\s+/);
+    let input = parts.length > 1 ? parts.slice(1).join(' ') : '';
+    if (!input && msg.reply_to_message?.text) {
+        input = msg.reply_to_message.text.trim();
+    }
     if (!input) {
         setUserState(telegramId, { step: 'awaiting_extrapolador_input' });
         return sendSafeMessage(chatId, '🔢 Envía un BIN de 6 dígitos, nombre de banco o país:');
@@ -2551,7 +2560,6 @@ bot.onText(/^[\/\.](?:extrapolador|extrapolado|extrapolad|extrapolar|extrapola|e
     await handleExtrapoladorCommand(chatId, telegramId, input);
     clearUserState(telegramId);
 });
-
 
 
 bot.onText(/^[\/\.](?:generadorccs|genccs|gncc|gen\b)(?:\s+(.+))?/i, async (msg, match) => {
