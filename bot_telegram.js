@@ -2003,9 +2003,37 @@ bot.onText(/^[\/\.]start/, async (msg) => {
             client.release();
         }
         if (isNew) {
-            await sendSafeMessage(chatId, `👋 ¡Hola ${fullName}! 👋\n\nHe guardado tu Chat ID: <code>${telegramId}</code>\n\nRegístrate en la web: https://astralchk.com/login.html con usuario @${username}`, { parse_mode: 'HTML' });
+            // Construir el mensaje exacto como lo pides
+            const separador = '꧁⎝ 𓆩༺✧༻𓆪 ⎠꧂';
+            const mensajeBienvenida = 
+        `👋 ¡Hola ${fullName}! 👋
+
+        He guardado tu Chat ID: ${telegramId}
+
+        Ahora puedes registrarte en la web siguiendo estos pasos:
+
+        1. Ve a la página:
+
+                        ${separador}
+        https://ciber7erroristaschk.com/login.html
+                        ${separador}
+
+        2. Usa tu usuario: @${username}
+
+        3. Recibirás un código de verificación aquí.
+
+        4. Escríbelo en la página web, y comienza a livear y shippear ahora.
+
+                        👾 ¡Te esperamos! 👾`;
+
+            // Enviamos sin parse_mode para respetar el formato literal
+            await sendSafeMessage(chatId, mensajeBienvenida);
+            // Si quieres mantener el parse_mode HTML/Markdown, usa 'Markdown' pero el texto plano ya funciona.
+        
+
+
         } else {
-            await sendSafeMessage(chatId, `👋 ¡Hola ${fullName}!\n💰 Créditos: ${existing.rows[0].credits}\n📅 Días: ${existing.rows[0].days_remaining}\n\nUsa /menu para ver comandos.`, { parse_mode: 'Markdown' });
+            await sendSafeMessage(chatId, `👋 ¡Hola ${fullName}!\n💰 Créditos: ${existing.rows[0].credits}\n📅 Días: ${existing.rows[0].days_remaining}\n\nUsa /menu para ver comandos. 👾`, { parse_mode: 'Markdown' });
         }
     } catch (error) {
         console.error(error);
