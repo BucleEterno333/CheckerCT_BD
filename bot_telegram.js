@@ -1113,8 +1113,7 @@ async function handleExtrapoladorCommand(chatId, telegramId, input) {
                                error.message.includes('No se pudo iniciar');
 
         if (isNetworkError && API_GRATIS) {
-            await sendSafeMessage(chatId, `⚠️ La API rápida no está disponible. Reintentando con la versión lenta...`);
-            const messageExtrapolador = `⚠️ *Avisenle a Bucle que Lattice y Extrapolador están caídos* ⚠️\n\n`;
+            await sendSafeMessage(chatId, `⚠️ La API rápida no está disponible.. reintentando con la versión lenta. Por favor de avisar a los administradores.`);
             await notifyAdminsAndGroups(messageExtrapolador);
             return await handleExtrapoladerCommand(chatId, telegramId, bin, fallback=true);
         } else {
@@ -2015,7 +2014,7 @@ bot.onText(/^[\/\.]start/, async (msg) => {
         1. Ve a la página:
 
                         ${separador}
-        https://ciber7erroristaschk.com/login.html
+        https://astralchk.com/login.html
                         ${separador}
 
         2. Usa tu usuario: @${username}
